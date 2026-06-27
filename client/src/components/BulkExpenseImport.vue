@@ -10,7 +10,7 @@ interface Member {
 }
 
 interface ExistingExpense {
-  expenseDate: string
+  expenseDate: string | null
   description: string
   amount: string
   paidBy: number
@@ -120,7 +120,7 @@ function parseRows(rows: Record<string, unknown>[]) {
   const existingKeys = new Set(
     props.existingExpenses.map((expense) =>
       duplicateKey({
-        expenseDate: expense.expenseDate,
+        expenseDate: expense.expenseDate ?? '',
         description: expense.description,
         amount: String(expense.amount),
         paidBy: Number(expense.paidBy),
@@ -146,9 +146,14 @@ function parseRows(rows: Record<string, unknown>[]) {
       notes: normalizeText(row.notes),
     }
     const errors: string[] = []
-    if (!validDate(expense.expenseDate)) errors.push('Invalid date')
-    else if (expense.expenseDate < props.startDate || expense.expenseDate > props.endDate) {
-      errors.push('Date outside period')
+    if (expense.expenseDate) {
+      if (!validDate(expense.expenseDate)) errors.push('Invalid date')
+      else if (
+        expense.expenseDate < props.startDate ||
+        expense.expenseDate > props.endDate
+      ) {
+        errors.push('Date outside period')
+      }
     }
     if (!expense.description) errors.push('Description required')
     else if (expense.description.length > 160) errors.push('Description too long')
@@ -269,8 +274,9 @@ async function submitImport() {
         />
         <p class="mt-3 text-xs leading-5 text-ink-500">
           Required columns:
-          <code>date, description, amount, paid_by</code>. Optional columns:
-          <code>category, notes</code>. Use household names for <code>paid_by</code>.
+          <code>description, amount, paid_by</code>. Optional columns:
+          <code>date, category, notes</code>. Use household names for
+          <code>paid_by</code>.
         </p>
         <button
           class="mt-2 text-xs font-semibold text-mint-700 hover:text-mint-600"
@@ -338,7 +344,7 @@ async function submitImport() {
                   />
                 </td>
                 <td class="px-3 py-3 text-ink-500">{{ row.line }}</td>
-                <td class="whitespace-nowrap px-3 py-3">{{ row.expense.expenseDate || '—' }}</td>
+                <td class="whitespace-nowrap px-3 py-3">{{ row.expense.expenseDate || 'No date' }}</td>
                 <td class="px-3 py-3 font-medium">{{ row.expense.description || '—' }}</td>
                 <td class="px-3 py-3">{{ row.expense.payerName || '—' }}</td>
                 <td class="whitespace-nowrap px-3 py-3 text-right font-medium">

@@ -155,7 +155,7 @@ interface SettlementMemberRow extends RowDataPacket {
 
 interface ExpenseRow extends RowDataPacket {
   id: number
-  expenseDate: string
+  expenseDate: string | null
   description: string
   category: string | null
   amount: string
@@ -490,8 +490,14 @@ api.post(
         if (!memberIds.has(paidBy)) {
           throw httpError(400, `Payer on CSV row ${index + 2} is not a household member.`)
         }
-        const expenseDate = date(row.expenseDate, `Date on CSV row ${index + 2}`)
-        if (expenseDate < period.startDate || expenseDate > period.endDate) {
+        const rawDate = String(row.expenseDate ?? '').trim()
+        const expenseDate = rawDate
+          ? date(rawDate, `Date on CSV row ${index + 2}`)
+          : null
+        if (
+          expenseDate &&
+          (expenseDate < period.startDate || expenseDate > period.endDate)
+        ) {
           throw httpError(
             400,
             `Date on CSV row ${index + 2} falls outside this calculation period.`,

@@ -23,7 +23,7 @@ interface Member {
 
 interface Expense {
   id: number
-  expenseDate: string
+  expenseDate: string | null
   description: string
   category: string | null
   amount: string
@@ -168,7 +168,7 @@ function clearExpenseForm() {
 
 function editExpense(expense: Expense) {
   editingExpenseId.value = expense.id
-  expenseForm.expenseDate = expense.expenseDate
+  expenseForm.expenseDate = expense.expenseDate ?? ''
   expenseForm.description = expense.description
   expenseForm.category = expense.category || ''
   expenseForm.amount = String(expense.amount)
@@ -582,7 +582,9 @@ watch(() => route.params.id, load)
             :key="expense.id"
             class="grid gap-3 px-5 py-4 md:grid-cols-[110px_1fr_130px_150px_100px] md:items-center md:gap-4"
           >
-            <p class="text-sm text-ink-500">{{ formatDate(expense.expenseDate) }}</p>
+            <p class="text-sm text-ink-500">
+              {{ formatDate(expense.expenseDate) || 'No date' }}
+            </p>
             <div>
               <p class="font-medium">{{ expense.description }}</p>
               <p v-if="expense.category" class="mt-0.5 text-xs text-ink-500">{{ expense.category }}</p>

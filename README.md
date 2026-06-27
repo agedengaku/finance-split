@@ -39,7 +39,6 @@ The required columns are:
 
 | Column | Format |
 | --- | --- |
-| `date` | `YYYY-MM-DD`; must fall within the selected calculation period |
 | `description` | Expense description, up to 160 characters |
 | `amount` | Positive whole-yen amount, such as `8500` |
 | `paid_by` | Household member's display name; matching is case-insensitive |
@@ -48,6 +47,7 @@ The optional columns are:
 
 | Column | Format |
 | --- | --- |
+| `date` | `YYYY-MM-DD`; when provided, it must fall within the selected calculation period |
 | `category` | Category name, up to 80 characters |
 | `notes` | Additional details, up to 2,000 characters |
 
@@ -58,10 +58,11 @@ date,description,category,amount,paid_by,notes
 2026-06-02,Groceries,Food,8500,You,
 2026-06-05,Electricity,Utilities,12000,Partner,June bill
 2026-06-08,"Household supplies, kitchen",Household,3200,You,
+,Water bill,Utilities,4200,Partner,Date not recorded
 ```
 
 Header names are normalized for capitalization, spaces, and hyphens.
-`expense_date` is also accepted for `date`, and `payer` is accepted for
+`date` may be blank or omitted. `expense_date` is also accepted for `date`, and `payer` is accepted for
 `paid_by`. Fields containing commas must use standard CSV double quotes.
 
 Each file may contain up to 500 expense rows and must be smaller than 2 MB.
