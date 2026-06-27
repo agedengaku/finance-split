@@ -9,6 +9,7 @@ and calculates the final payment required to settle the period.
 - Custom monthly or multi-month calculation periods
 - Income-weighted expense allocation
 - Expense tracking by payer, date, and category
+- Repeatable CSV expense imports with validation, duplicate warnings, and batch undo
 - Exact whole-yen calculations with deterministic remainder allocation
 - Two-user authentication with database-backed sessions
 - Period closing and historical summaries

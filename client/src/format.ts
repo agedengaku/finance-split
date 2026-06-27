@@ -24,3 +24,13 @@ export function todayIso(): string {
     String(now.getDate()).padStart(2, '0'),
   ].join('-')
 }
+
+export function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat('en', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(`${value.replace(' ', 'T')}Z`))
+}

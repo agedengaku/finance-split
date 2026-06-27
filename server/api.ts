@@ -159,14 +159,29 @@ interface ExpenseRow extends RowDataPacket {
   description: string
   category: string | null
   amount: string
+  importId: number | null
   paidBy: number
   payerName: string
   notes: string | null
 }
 
+interface ExpenseImportRow extends RowDataPacket {
+  id: number
+  sourceName: string
+  rowCount: number
+  totalAmount: string
+  importedBy: string
+  importedAt: string
+}
+
 interface ExpenseLookupRow extends RowDataPacket {
   id: number
   periodId: number
+}
+
+interface ImportLookupRow extends RowDataPacket {
+  id: number
+  status: 'open' | 'closed'
 }
 
 interface ExpenseStatusRow extends RowDataPacket {
@@ -370,11 +385,21 @@ api.get(
     const [expenseRows] = await pool.execute<ExpenseRow[]>(
       `SELECT e.id, DATE_FORMAT(e.expense_date, '%Y-%m-%d') AS expenseDate,
               e.description, e.category, e.amount, e.paid_by AS paidBy,
-              u.display_name AS payerName, e.notes
+              e.import_id AS importId, u.display_name AS payerName, e.notes
          FROM expenses e
          JOIN users u ON u.id = e.paid_by
         WHERE e.period_id = ?
         ORDER BY e.expense_date DESC, e.id DESC`,
+      [periodId],
+    )
+    const [importRows] = await pool.execute<ExpenseImportRow[]>(
+      `SELECT ei.id, ei.source_name AS sourceName, ei.row_count AS rowCount,
+              ei.total_amount AS totalAmount, u.display_name AS importedBy,
+              DATE_FORMAT(ei.created_at, '%Y-%m-%d %H:%i:%s') AS importedAt
+         FROM expense_imports ei
+         JOIN users u ON u.id = ei.imported_by
+        WHERE ei.period_id = ?
+        ORDER BY ei.created_at DESC, ei.id DESC`,
       [periodId],
     )
     const summary = calculateSettlement(
@@ -384,7 +409,13 @@ api.get(
         paidBy: expense.paidBy,
       })),
     )
-    response.json({ period, members: memberRows, expenses: expenseRows, summary })
+    response.json({
+      period,
+      members: memberRows,
+      expenses: expenseRows,
+      imports: importRows,
+      summary,
+    })
   }),
 )
 
@@ -429,6 +460,103 @@ api.put(
 )
 
 api.post(
+  '/periods/:periodId/imports',
+  asyncRoute(async (request, response) => {
+    const periodId = id(request.params.periodId, 'Period ID')
+    const sourceName = requiredText(request.body.sourceName, 'File name', 255)
+    const rawRows: unknown = request.body.rows
+    if (!Array.isArray(rawRows) || rawRows.length === 0) {
+      throw httpError(400, 'The import must contain at least one expense.')
+    }
+    if (rawRows.length > 500) {
+      throw httpError(400, 'A single import cannot contain more than 500 expenses.')
+    }
+
+    const result = await withTransaction(async (connection) => {
+      const period = await getPeriod(periodId, request.membership.householdId, connection)
+      assertEditable(period)
+
+      const [memberRows] = await connection.execute<RowDataPacket[]>(
+        'SELECT user_id AS userId FROM household_members WHERE household_id = ?',
+        [request.membership.householdId],
+      )
+      const memberIds = new Set(memberRows.map((row) => Number(row.userId)))
+      const rows = rawRows.map((rawRow, index) => {
+        if (!rawRow || typeof rawRow !== 'object' || Array.isArray(rawRow)) {
+          throw httpError(400, `CSV row ${index + 2} is invalid.`)
+        }
+        const row = rawRow as Record<string, unknown>
+        const paidBy = id(row.paidBy, `Payer on CSV row ${index + 2}`)
+        if (!memberIds.has(paidBy)) {
+          throw httpError(400, `Payer on CSV row ${index + 2} is not a household member.`)
+        }
+        const expenseDate = date(row.expenseDate, `Date on CSV row ${index + 2}`)
+        if (expenseDate < period.startDate || expenseDate > period.endDate) {
+          throw httpError(
+            400,
+            `Date on CSV row ${index + 2} falls outside this calculation period.`,
+          )
+        }
+        return {
+          expenseDate,
+          description: requiredText(
+            row.description,
+            `Description on CSV row ${index + 2}`,
+            160,
+          ),
+          category: optionalText(row.category, `Category on CSV row ${index + 2}`, 80),
+          amount: money(row.amount),
+          paidBy,
+          notes: optionalText(row.notes, `Notes on CSV row ${index + 2}`, 2000),
+        }
+      })
+
+      const totalAmount = rows.reduce((total, row) => total + BigInt(row.amount), 0n)
+      const [importResult] = await connection.execute<ResultSetHeader>(
+        `INSERT INTO expense_imports
+           (period_id, source_name, row_count, total_amount, imported_by)
+         VALUES (?, ?, ?, ?, ?)`,
+        [
+          periodId,
+          sourceName,
+          rows.length,
+          totalAmount.toString(),
+          request.session.userId!,
+        ],
+      )
+
+      for (const row of rows) {
+        await connection.execute(
+          `INSERT INTO expenses
+             (period_id, import_id, expense_date, description, category, amount,
+              paid_by, notes, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            periodId,
+            importResult.insertId,
+            row.expenseDate,
+            row.description,
+            row.category,
+            row.amount,
+            row.paidBy,
+            row.notes,
+            request.session.userId!,
+          ],
+        )
+      }
+
+      return {
+        id: importResult.insertId,
+        rowCount: rows.length,
+        totalAmount: totalAmount.toString(),
+      }
+    })
+
+    response.status(201).json({ import: result })
+  }),
+)
+
+api.post(
   '/periods/:periodId/expenses',
   asyncRoute(async (request, response) => {
     const periodId = id(request.params.periodId, 'Period ID')
@@ -461,6 +589,24 @@ api.post(
       ],
     )
     response.status(201).json({ expense: { id: result.insertId } })
+  }),
+)
+
+api.delete(
+  '/imports/:importId',
+  asyncRoute(async (request, response) => {
+    const importId = id(request.params.importId, 'Import ID')
+    const [rows] = await pool.execute<ImportLookupRow[]>(
+      `SELECT ei.id, p.status
+         FROM expense_imports ei
+         JOIN periods p ON p.id = ei.period_id
+        WHERE ei.id = ? AND p.household_id = ?`,
+      [importId, request.membership.householdId],
+    )
+    if (!rows[0]) throw httpError(404, 'Import batch not found.')
+    assertEditable(rows[0])
+    await pool.execute('DELETE FROM expense_imports WHERE id = ?', [importId])
+    response.status(204).end()
   }),
 )
 

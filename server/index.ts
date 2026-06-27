@@ -32,7 +32,7 @@ app.use(
     contentSecurityPolicy: config.env === 'production' ? undefined : false,
   }),
 )
-app.use(express.json({ limit: '100kb' }))
+app.use(express.json({ limit: '2mb' }))
 app.use((request, response, next) => {
   if (
     !['GET', 'HEAD', 'OPTIONS'].includes(request.method) &&

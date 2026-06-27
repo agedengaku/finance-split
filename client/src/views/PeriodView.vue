@@ -2,7 +2,8 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ApiError, api } from '../api'
-import { formatDate, formatYen, todayIso } from '../format'
+import BulkExpenseImport from '../components/BulkExpenseImport.vue'
+import { formatDate, formatDateTime, formatYen, todayIso } from '../format'
 
 const route = useRoute()
 
@@ -26,9 +27,19 @@ interface Expense {
   description: string
   category: string | null
   amount: string
+  importId: number | null
   paidBy: number
   payerName: string
   notes: string | null
+}
+
+interface ImportBatch {
+  id: number
+  sourceName: string
+  rowCount: number
+  totalAmount: string
+  importedBy: string
+  importedAt: string
 }
 
 interface SummaryMember {
@@ -60,6 +71,7 @@ interface PeriodResponse {
   period: Period
   members: Member[]
   expenses: Expense[]
+  imports: ImportBatch[]
   summary: Summary
 }
 
@@ -69,6 +81,7 @@ const error = ref('')
 const period = ref<Period | null>(null)
 const members = ref<Member[]>([])
 const expenses = ref<Expense[]>([])
+const imports = ref<ImportBatch[]>([])
 const summary = ref<Summary>({
   ready: false,
   reason: 'Enter household income to calculate the split.',
@@ -79,6 +92,7 @@ const summary = ref<Summary>({
 })
 const incomeDraft = reactive<Record<number, string>>({})
 const editingExpenseId = ref<number | null>(null)
+const showBulkImport = ref(false)
 
 const expenseForm = reactive({
   expenseDate: todayIso(),
@@ -99,6 +113,7 @@ async function load() {
     period.value = data.period
     members.value = data.members
     expenses.value = data.expenses
+    imports.value = data.imports
     summary.value = data.summary
     for (const member of data.members) incomeDraft[member.id] = String(member.income)
     const firstMember = data.members[0]
@@ -194,6 +209,30 @@ async function removeExpense(expense: Expense) {
     error.value =
       requestError instanceof ApiError ? requestError.message : 'Unable to delete the expense.'
   }
+}
+
+async function undoImport(batch: ImportBatch) {
+  if (
+    !window.confirm(
+      `Undo “${batch.sourceName}”? This will delete its ${batch.rowCount} imported expenses.`,
+    )
+  ) {
+    return
+  }
+  error.value = ''
+  try {
+    await api(`/imports/${batch.id}`, { method: 'DELETE', body: {} })
+    await load()
+  } catch (requestError: unknown) {
+    error.value =
+      requestError instanceof ApiError
+        ? requestError.message
+        : 'Unable to undo the import.'
+  }
+}
+
+async function importComplete() {
+  await load()
 }
 
 async function toggleStatus() {
@@ -369,6 +408,52 @@ watch(() => route.params.id, load)
         </form>
       </div>
     </div>
+
+    <div v-if="!isClosed" class="mb-4 flex justify-end">
+      <button class="button-secondary" type="button" @click="showBulkImport = !showBulkImport">
+        {{ showBulkImport ? 'Hide CSV import' : 'Import CSV' }}
+      </button>
+    </div>
+
+    <BulkExpenseImport
+      v-if="showBulkImport && !isClosed"
+      :period-id="period.id"
+      :start-date="period.startDate"
+      :end-date="period.endDate"
+      :members="members"
+      :existing-expenses="expenses"
+      @imported="importComplete"
+    />
+
+    <section v-if="imports.length" class="card mb-8 overflow-hidden">
+      <div class="border-b bg-slate-50/70 px-5 py-4">
+        <p class="eyebrow">Import history</p>
+        <h2 class="mt-1 text-lg font-semibold">CSV batches</h2>
+      </div>
+      <div class="divide-y">
+        <div
+          v-for="batch in imports"
+          :key="batch.id"
+          class="flex flex-col justify-between gap-3 px-5 py-4 sm:flex-row sm:items-center"
+        >
+          <div>
+            <p class="font-medium">{{ batch.sourceName }}</p>
+            <p class="mt-1 text-xs text-ink-500">
+              {{ batch.rowCount }} expenses · {{ formatYen(batch.totalAmount) }} ·
+              {{ batch.importedBy }} · {{ formatDateTime(batch.importedAt) }}
+            </p>
+          </div>
+          <button
+            v-if="!isClosed"
+            class="text-left text-sm font-medium text-red-600 hover:text-red-500"
+            type="button"
+            @click="undoImport(batch)"
+          >
+            Undo import
+          </button>
+        </div>
+      </div>
+    </section>
 
     <form
       v-if="!isClosed"
