@@ -33,6 +33,16 @@ interface Expense {
   notes: string | null
 }
 
+interface RecurringExpense {
+  id: number
+  description: string
+  category: string | null
+  amount: string
+  paidBy: number
+  payerName: string
+  notes: string | null
+}
+
 interface ImportBatch {
   id: number
   sourceName: string
@@ -71,6 +81,7 @@ interface PeriodResponse {
   period: Period
   members: Member[]
   expenses: Expense[]
+  recurringExpenses: RecurringExpense[]
   imports: ImportBatch[]
   summary: Summary
 }
@@ -81,6 +92,7 @@ const error = ref('')
 const period = ref<Period | null>(null)
 const members = ref<Member[]>([])
 const expenses = ref<Expense[]>([])
+const recurringExpenses = ref<RecurringExpense[]>([])
 const imports = ref<ImportBatch[]>([])
 const summary = ref<Summary>({
   ready: false,
@@ -92,7 +104,9 @@ const summary = ref<Summary>({
 })
 const incomeDraft = reactive<Record<number, string>>({})
 const editingExpenseId = ref<number | null>(null)
+const editingRecurringExpenseId = ref<number | null>(null)
 const showBulkImport = ref(false)
+const showRecurringForm = ref(false)
 
 const expenseForm = reactive({
   expenseDate: todayIso(),
@@ -103,7 +117,22 @@ const expenseForm = reactive({
   notes: '',
 })
 
+const recurringExpenseForm = reactive({
+  description: '',
+  category: '',
+  amount: '',
+  paidBy: '',
+  notes: '',
+  applyToCurrentPeriod: true,
+})
+
 const isClosed = computed(() => period.value?.status === 'closed')
+
+watch(isClosed, (closed) => {
+  if (closed) {
+    recurringExpenseForm.applyToCurrentPeriod = false
+  }
+})
 
 async function load() {
   loading.value = true
@@ -113,12 +142,16 @@ async function load() {
     period.value = data.period
     members.value = data.members
     expenses.value = data.expenses
+    recurringExpenses.value = data.recurringExpenses
     imports.value = data.imports
     summary.value = data.summary
     for (const member of data.members) incomeDraft[member.id] = String(member.income)
     const firstMember = data.members[0]
     if (!expenseForm.paidBy && firstMember) {
       expenseForm.paidBy = String(firstMember.id)
+    }
+    if (!recurringExpenseForm.paidBy && firstMember) {
+      recurringExpenseForm.paidBy = String(firstMember.id)
     }
     if (
       expenseForm.expenseDate < data.period.startDate ||
@@ -166,6 +199,28 @@ function clearExpenseForm() {
   expenseForm.notes = ''
 }
 
+function clearRecurringExpenseForm() {
+  editingRecurringExpenseId.value = null
+  recurringExpenseForm.description = ''
+  recurringExpenseForm.category = ''
+  recurringExpenseForm.amount = ''
+  recurringExpenseForm.paidBy = String(members.value[0]?.id || '')
+  recurringExpenseForm.notes = ''
+  recurringExpenseForm.applyToCurrentPeriod = !!period.value && !isClosed.value
+}
+
+function toggleRecurringForm() {
+  showRecurringForm.value = !showRecurringForm.value
+  if (showRecurringForm.value && !editingRecurringExpenseId.value) {
+    clearRecurringExpenseForm()
+  }
+}
+
+function closeRecurringForm() {
+  clearRecurringExpenseForm()
+  showRecurringForm.value = false
+}
+
 function editExpense(expense: Expense) {
   editingExpenseId.value = expense.id
   expenseForm.expenseDate = expense.expenseDate ?? ''
@@ -175,6 +230,18 @@ function editExpense(expense: Expense) {
   expenseForm.paidBy = String(expense.paidBy)
   expenseForm.notes = expense.notes || ''
   document.querySelector('#expense-form')?.scrollIntoView({ behavior: 'smooth' })
+}
+
+function editRecurringExpense(expense: RecurringExpense) {
+  editingRecurringExpenseId.value = expense.id
+  showRecurringForm.value = true
+  recurringExpenseForm.description = expense.description
+  recurringExpenseForm.category = expense.category || ''
+  recurringExpenseForm.amount = String(expense.amount)
+  recurringExpenseForm.paidBy = String(expense.paidBy)
+  recurringExpenseForm.notes = expense.notes || ''
+  recurringExpenseForm.applyToCurrentPeriod = false
+  document.querySelector('#recurring-expense-form')?.scrollIntoView({ behavior: 'smooth' })
 }
 
 async function saveExpense() {
@@ -199,6 +266,48 @@ async function saveExpense() {
   }
 }
 
+async function saveRecurringExpense() {
+  if (!period.value) return
+  error.value = ''
+  saving.value = true
+  try {
+    const path = editingRecurringExpenseId.value
+      ? `/recurring-expenses/${editingRecurringExpenseId.value}`
+      : '/recurring-expenses'
+    const body = editingRecurringExpenseId.value
+      ? {
+          description: recurringExpenseForm.description,
+          category: recurringExpenseForm.category,
+          amount: recurringExpenseForm.amount,
+          paidBy: recurringExpenseForm.paidBy,
+          notes: recurringExpenseForm.notes,
+        }
+      : {
+          description: recurringExpenseForm.description,
+          category: recurringExpenseForm.category,
+          amount: recurringExpenseForm.amount,
+          paidBy: recurringExpenseForm.paidBy,
+          notes: recurringExpenseForm.notes,
+          applyToPeriodId:
+            recurringExpenseForm.applyToCurrentPeriod && !isClosed.value ? period.value.id : null,
+        }
+    await api(path, {
+      method: editingRecurringExpenseId.value ? 'PUT' : 'POST',
+      body,
+    })
+    clearRecurringExpenseForm()
+    showRecurringForm.value = false
+    await load()
+  } catch (requestError: unknown) {
+    error.value =
+      requestError instanceof ApiError
+        ? requestError.message
+        : 'Unable to save the recurring expense.'
+  } finally {
+    saving.value = false
+  }
+}
+
 async function removeExpense(expense: Expense) {
   if (!window.confirm(`Delete “${expense.description}”?`)) return
   error.value = ''
@@ -208,6 +317,26 @@ async function removeExpense(expense: Expense) {
   } catch (requestError: unknown) {
     error.value =
       requestError instanceof ApiError ? requestError.message : 'Unable to delete the expense.'
+  }
+}
+
+async function removeRecurringExpense(expense: RecurringExpense) {
+  if (
+    !window.confirm(
+      `Delete recurring expense “${expense.description}”? This will not remove expenses already copied into past periods.`,
+    )
+  ) {
+    return
+  }
+  error.value = ''
+  try {
+    await api(`/recurring-expenses/${expense.id}`, { method: 'DELETE', body: {} })
+    await load()
+  } catch (requestError: unknown) {
+    error.value =
+      requestError instanceof ApiError
+        ? requestError.message
+        : 'Unable to delete the recurring expense.'
   }
 }
 
@@ -406,6 +535,180 @@ watch(() => route.params.id, load)
             </div>
           </div>
         </form>
+      </div>
+    </div>
+
+    <div class="mb-8">
+      <div class="mb-3 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+        <div>
+          <p class="eyebrow">Recurring</p>
+          <h2 class="mt-1 text-xl font-semibold">Recurring expenses</h2>
+          <p class="mt-1 text-sm text-ink-500">
+            Save a template once and it will be copied into each new period automatically.
+          </p>
+        </div>
+        <button
+          class="button-secondary"
+          type="button"
+          @click="toggleRecurringForm"
+        >
+          {{ showRecurringForm || editingRecurringExpenseId ? 'Hide form' : 'Add recurring expense' }}
+        </button>
+      </div>
+
+      <div class="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+        <form
+          v-if="showRecurringForm || editingRecurringExpenseId"
+          id="recurring-expense-form"
+          class="card p-5 sm:p-6"
+          @submit.prevent="saveRecurringExpense"
+        >
+          <div class="mb-5 flex items-center justify-between gap-4">
+            <div>
+              <p class="eyebrow">
+                {{ editingRecurringExpenseId ? 'Editing template' : 'New template' }}
+              </p>
+              <h3 class="mt-1 text-lg font-semibold">
+                {{
+                  editingRecurringExpenseId ? 'Update recurring expense' : 'Add recurring expense'
+                }}
+              </h3>
+            </div>
+            <button
+              v-if="editingRecurringExpenseId"
+              class="text-sm text-ink-500 hover:text-ink-950"
+              type="button"
+              @click="closeRecurringForm"
+            >
+              Cancel
+            </button>
+          </div>
+
+          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="sm:col-span-1 lg:col-span-2">
+              <label class="label" for="recurringDescription">Description</label>
+              <input
+                id="recurringDescription"
+                v-model="recurringExpenseForm.description"
+                class="input"
+                placeholder="Rent, gym, insurance…"
+                maxlength="160"
+                required
+              />
+            </div>
+            <div>
+              <label class="label" for="recurringAmount">Amount</label>
+              <div class="relative">
+                <span class="pointer-events-none absolute top-2.5 left-3.5 text-sm text-ink-500">¥</span>
+                <input
+                  id="recurringAmount"
+                  v-model="recurringExpenseForm.amount"
+                  class="input !pl-8"
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputmode="numeric"
+                  placeholder="0"
+                  required
+                />
+              </div>
+            </div>
+            <div>
+              <label class="label" for="recurringPaidBy">Paid by</label>
+              <select
+                id="recurringPaidBy"
+                v-model="recurringExpenseForm.paidBy"
+                class="input"
+                required
+              >
+                <option v-for="member in members" :key="member.id" :value="String(member.id)">
+                  {{ member.name }}
+                </option>
+              </select>
+            </div>
+            <div>
+              <label class="label" for="recurringCategory">Category</label>
+              <input
+                id="recurringCategory"
+                v-model="recurringExpenseForm.category"
+                class="input"
+                placeholder="Optional"
+                maxlength="80"
+              />
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="recurringNotes">Notes</label>
+              <input
+                id="recurringNotes"
+                v-model="recurringExpenseForm.notes"
+                class="input"
+                placeholder="Optional details"
+                maxlength="2000"
+              />
+            </div>
+            <label
+              class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-ink-700 sm:col-span-2 lg:col-span-4"
+            >
+              <input
+                v-model="recurringExpenseForm.applyToCurrentPeriod"
+                type="checkbox"
+                class="size-4 accent-mint-600"
+                :disabled="isClosed"
+              />
+              Also add this to the current period now
+            </label>
+          </div>
+
+          <div class="mt-5 flex justify-end gap-3">
+            <button
+              v-if="!editingRecurringExpenseId"
+              class="button-secondary"
+              type="button"
+              @click="closeRecurringForm"
+            >
+              Cancel
+            </button>
+            <button class="button-primary" type="submit" :disabled="saving">
+              {{ saving ? 'Saving…' : editingRecurringExpenseId ? 'Update template' : 'Save template' }}
+            </button>
+          </div>
+        </form>
+
+        <div class="card overflow-hidden">
+          <div class="border-b bg-slate-50/70 px-5 py-4">
+            <p class="eyebrow">Saved templates</p>
+            <h3 class="mt-1 text-lg font-semibold">Applied to future periods</h3>
+          </div>
+          <div v-if="recurringExpenses.length" class="divide-y">
+            <div
+              v-for="expense in recurringExpenses"
+              :key="expense.id"
+              class="flex flex-col justify-between gap-3 px-5 py-4 sm:flex-row sm:items-center"
+            >
+              <div>
+                <p class="font-medium">{{ expense.description }}</p>
+                <p class="mt-1 text-xs text-ink-500">
+                  {{ expense.payerName }} · {{ formatYen(expense.amount) }}
+                  <span v-if="expense.category"> · {{ expense.category }}</span>
+                </p>
+                <p v-if="expense.notes" class="mt-1 text-xs text-ink-500">
+                  {{ expense.notes }}
+                </p>
+              </div>
+              <div class="flex gap-3 text-sm">
+                <button class="font-medium text-mint-700 hover:text-mint-600" type="button" @click="editRecurringExpense(expense)">
+                  Edit
+                </button>
+                <button class="font-medium text-red-600 hover:text-red-500" type="button" @click="removeRecurringExpense(expense)">
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="px-5 py-8 text-center text-sm text-ink-500">
+            No recurring expenses yet.
+          </div>
+        </div>
       </div>
     </div>
 

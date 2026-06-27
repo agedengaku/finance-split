@@ -15,6 +15,7 @@ Core behavior:
 - Calculate settlement based on each person's share of total household income
 - Support manual expense entry and CSV import
 - Support multiple CSV uploads for the same period
+- Support recurring expense templates that auto-fill new periods
 
 CSV import rules:
 
@@ -38,4 +39,5 @@ Status notes:
 
 - Authentication is already in place
 - CSV import is already in place
+- Recurring expense templates are already in place
 - The app is set up for local development and can be viewed on localhost

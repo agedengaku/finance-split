@@ -10,6 +10,7 @@ and calculates the final payment required to settle the period.
 - Income-weighted expense allocation
 - Expense tracking by payer, date, and category
 - Repeatable CSV expense imports with validation, duplicate warnings, and batch undo
+- Recurring expense templates that can be copied into each new period
 - Exact whole-yen calculations with deterministic remainder allocation
 - Two-user authentication with database-backed sessions
 - Period closing and historical summaries
@@ -75,6 +76,15 @@ Every upload is stored as a separate batch. Undoing a batch deletes only the
 expenses belonging to that batch. All selected rows are saved in one database
 transaction, so a server-side validation failure does not result in a partial
 import.
+
+## Recurring expenses
+
+Use the recurring expense form inside a calculation period to save shared costs
+you want to reuse every time, such as rent or subscriptions. Saved templates are
+copied into each new period automatically.
+
+If the current period is open, you can also add the recurring expense to that
+period immediately when you save the template.
 
 ## Local setup
 

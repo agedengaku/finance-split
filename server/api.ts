@@ -174,6 +174,16 @@ interface ExpenseImportRow extends RowDataPacket {
   importedAt: string
 }
 
+interface RecurringExpenseRow extends RowDataPacket {
+  id: number
+  description: string
+  category: string | null
+  amount: string
+  paidBy: number
+  payerName: string
+  notes: string | null
+}
+
 interface ExpenseLookupRow extends RowDataPacket {
   id: number
   periodId: number
@@ -187,6 +197,11 @@ interface ImportLookupRow extends RowDataPacket {
 interface ExpenseStatusRow extends RowDataPacket {
   id: number
   status: 'open' | 'closed'
+}
+
+interface RecurringExpenseLookupRow extends RowDataPacket {
+  id: number
+  householdId: number
 }
 
 async function getPeriod(
@@ -221,6 +236,49 @@ function assertEditable(period: Pick<PeriodRecord, 'status'>): void {
   if (period.status === 'closed') {
     throw httpError(409, 'Reopen this period before changing its income or expenses.')
   }
+}
+
+async function getRecurringExpenseRows(
+  householdId: number,
+  connection: Pool | PoolConnection = pool,
+): Promise<RecurringExpenseRow[]> {
+  const [rows] = await connection.execute<RecurringExpenseRow[]>(
+    `SELECT re.id, re.description, re.category, re.amount, re.paid_by AS paidBy,
+            u.display_name AS payerName, re.notes
+       FROM recurring_expenses re
+       JOIN users u ON u.id = re.paid_by
+      WHERE re.household_id = ?
+      ORDER BY re.created_at DESC, re.id DESC`,
+    [householdId],
+  )
+  return rows
+}
+
+async function applyRecurringExpensesToPeriod(
+  connection: Pool | PoolConnection,
+  householdId: number,
+  period: PeriodRecord,
+  createdBy: number,
+): Promise<number> {
+  const recurringRows = await getRecurringExpenseRows(householdId, connection)
+  for (const row of recurringRows) {
+    await connection.execute(
+      `INSERT INTO expenses
+         (period_id, expense_date, description, category, amount, paid_by, notes, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        period.id,
+        period.startDate,
+        row.description,
+        row.category,
+        row.amount,
+        row.paidBy,
+        row.notes,
+        createdBy,
+      ],
+    )
+  }
+  return recurringRows.length
 }
 
 api.post(
@@ -352,18 +410,27 @@ api.post(
     const endDate = date(request.body.endDate, 'End date')
     if (startDate > endDate) throw httpError(400, 'End date must be on or after the start date.')
 
-    const [result] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO periods (household_id, label, start_date, end_date, created_by)
-       VALUES (?, ?, ?, ?, ?)`,
-      [
+    const period = await withTransaction(async (connection) => {
+      const [result] = await connection.execute<ResultSetHeader>(
+        `INSERT INTO periods (household_id, label, start_date, end_date, created_by)
+         VALUES (?, ?, ?, ?, ?)`,
+        [
+          request.membership.householdId,
+          label,
+          startDate,
+          endDate,
+          request.session.userId!,
+        ],
+      )
+      const created = await getPeriod(result.insertId, request.membership.householdId, connection)
+      await applyRecurringExpensesToPeriod(
+        connection,
         request.membership.householdId,
-        label,
-        startDate,
-        endDate,
+        created,
         request.session.userId!,
-      ],
-    )
-    const period = await getPeriod(result.insertId, request.membership.householdId)
+      )
+      return created
+    })
     response.status(201).json({ period })
   }),
 )
@@ -402,6 +469,7 @@ api.get(
         ORDER BY ei.created_at DESC, ei.id DESC`,
       [periodId],
     )
+    const recurringExpenses = await getRecurringExpenseRows(request.membership.householdId)
     const summary = calculateSettlement(
       memberRows,
       expenseRows.map((expense) => ({
@@ -413,6 +481,7 @@ api.get(
       period,
       members: memberRows,
       expenses: expenseRows,
+      recurringExpenses,
       imports: importRows,
       summary,
     })
@@ -559,6 +628,117 @@ api.post(
     })
 
     response.status(201).json({ import: result })
+  }),
+)
+
+api.post(
+  '/recurring-expenses',
+  asyncRoute(async (request, response) => {
+    const description = requiredText(request.body.description, 'Description', 160)
+    const category = optionalText(request.body.category, 'Category', 80)
+    const amount = money(request.body.amount)
+    const paidBy = id(request.body.paidBy, 'Payer')
+    await assertMember(paidBy, request.membership.householdId)
+    const notes = optionalText(request.body.notes, 'Notes', 2000)
+    const applyToPeriodId =
+      request.body.applyToPeriodId === undefined || request.body.applyToPeriodId === null
+        ? null
+        : id(request.body.applyToPeriodId, 'Period ID')
+
+    const result = await withTransaction(async (connection) => {
+      let appliedExpenseId: number | null = null
+      if (applyToPeriodId) {
+        const period = await getPeriod(applyToPeriodId, request.membership.householdId, connection)
+        assertEditable(period)
+        const [expenseResult] = await connection.execute<ResultSetHeader>(
+          `INSERT INTO expenses
+             (period_id, expense_date, description, category, amount, paid_by, notes, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            period.id,
+            period.startDate,
+            description,
+            category,
+            amount,
+            paidBy,
+            notes,
+            request.session.userId!,
+          ],
+        )
+        appliedExpenseId = expenseResult.insertId
+      }
+
+      const [templateResult] = await connection.execute<ResultSetHeader>(
+        `INSERT INTO recurring_expenses
+           (household_id, description, category, amount, paid_by, notes, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          request.membership.householdId,
+          description,
+          category,
+          amount,
+          paidBy,
+          notes,
+          request.session.userId!,
+        ],
+      )
+
+      return {
+        recurringExpense: {
+          id: templateResult.insertId,
+        },
+        appliedExpenseId,
+      }
+    })
+
+    response.status(201).json(result)
+  }),
+)
+
+api.put(
+  '/recurring-expenses/:recurringExpenseId',
+  asyncRoute(async (request, response) => {
+    const recurringExpenseId = id(request.params.recurringExpenseId, 'Recurring expense ID')
+    const description = requiredText(request.body.description, 'Description', 160)
+    const category = optionalText(request.body.category, 'Category', 80)
+    const amount = money(request.body.amount)
+    const paidBy = id(request.body.paidBy, 'Payer')
+    await assertMember(paidBy, request.membership.householdId)
+    const notes = optionalText(request.body.notes, 'Notes', 2000)
+
+    const [rows] = await pool.execute<RecurringExpenseLookupRow[]>(
+      `SELECT re.id, re.household_id AS householdId
+         FROM recurring_expenses re
+        WHERE re.id = ? AND re.household_id = ?`,
+      [recurringExpenseId, request.membership.householdId],
+    )
+    if (!rows[0]) throw httpError(404, 'Recurring expense not found.')
+
+    await pool.execute(
+      `UPDATE recurring_expenses
+          SET description = ?, category = ?, amount = ?, paid_by = ?, notes = ?
+        WHERE id = ?`,
+      [description, category, amount, paidBy, notes, recurringExpenseId],
+    )
+
+    response.json({ recurringExpense: { id: recurringExpenseId } })
+  }),
+)
+
+api.delete(
+  '/recurring-expenses/:recurringExpenseId',
+  asyncRoute(async (request, response) => {
+    const recurringExpenseId = id(request.params.recurringExpenseId, 'Recurring expense ID')
+    const [rows] = await pool.execute<RecurringExpenseLookupRow[]>(
+      `SELECT re.id, re.household_id AS householdId
+         FROM recurring_expenses re
+        WHERE re.id = ? AND re.household_id = ?`,
+      [recurringExpenseId, request.membership.householdId],
+    )
+    if (!rows[0]) throw httpError(404, 'Recurring expense not found.')
+
+    await pool.execute('DELETE FROM recurring_expenses WHERE id = ?', [recurringExpenseId])
+    response.status(204).end()
   }),
 )
 
