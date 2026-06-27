@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink-950: #17211d;
+  --color-ink-700: #44514b;
+  --color-ink-500: #6d7a74;
+  --color-mint-50: #f0faf6;
+  --color-mint-100: #d9f2e7;
+  --color-mint-500: #28a875;
+  --color-mint-600: #168d60;
+  --color-mint-700: #11724f;
+}
+
+@layer base {
+  * {
+    @apply border-slate-200;
+  }
+
+  body {
+    @apply m-0 min-w-80 bg-[#f6f8f7] text-ink-950 antialiased;
+    font-family:
+      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button {
+    @apply cursor-pointer;
+  }
+}
+@layer components {
+  .card {
+    @apply rounded-2xl border border-slate-200/90 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)];
+  }
+
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-ink-700;
+  }
+
+  .input {
+    @apply w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-ink-950 outline-none transition placeholder:text-slate-400 focus:border-mint-500 focus:ring-3 focus:ring-mint-100 disabled:bg-slate-100;
+  }
+
+  .button-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-mint-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-mint-700 focus:outline-none focus:ring-3 focus:ring-mint-100 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .button-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-ink-700 transition hover:bg-slate-50 focus:outline-none focus:ring-3 focus:ring-slate-200 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .eyebrow {
+    @apply text-xs font-semibold tracking-[0.13em] text-mint-700 uppercase;
+  }
+}

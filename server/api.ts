@@ -1,0 +1,529 @@
+import bcrypt from 'bcryptjs'
+import express, {
+  type NextFunction,
+  type Request,
+  type RequestHandler,
+  type Response,
+} from 'express'
+import rateLimit from 'express-rate-limit'
+import type {
+  Pool,
+  PoolConnection,
+  ResultSetHeader,
+  RowDataPacket,
+} from 'mysql2/promise'
+import { pool, withTransaction } from './db.js'
+import { calculateSettlement } from './settlement.js'
+import type { HouseholdMembership } from './types.js'
+
+export const api = express.Router()
+
+type AsyncHandler = (
+  request: Request,
+  response: Response,
+  next: NextFunction,
+) => Promise<unknown>
+
+const asyncRoute = (handler: AsyncHandler): RequestHandler => (request, response, next) =>
+  Promise.resolve(handler(request, response, next)).catch(next)
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Please try again later.' },
+})
+
+class HttpError extends Error {
+  status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'HttpError'
+    this.status = status
+  }
+}
+
+function httpError(status: number, message: string): HttpError {
+  return new HttpError(status, message)
+}
+
+function requiredText(value: unknown, label: string, maxLength = 160): string {
+  const text = String(value ?? '').trim()
+  if (!text) throw httpError(400, `${label} is required.`)
+  if (text.length > maxLength) {
+    throw httpError(400, `${label} must be ${maxLength} characters or fewer.`)
+  }
+  return text
+}
+
+function optionalText(value: unknown, label: string, maxLength: number): string | null {
+  const text = String(value ?? '').trim()
+  if (!text) return null
+  if (text.length > maxLength) {
+    throw httpError(400, `${label} must be ${maxLength} characters or fewer.`)
+  }
+  return text
+}
+
+function money(value: unknown, { allowZero = false }: { allowZero?: boolean } = {}): string {
+  const text = String(value ?? '').trim()
+  if (!/^\d{1,13}$/.test(text)) {
+    throw httpError(400, 'Enter a valid whole-yen amount.')
+  }
+  if (!allowZero && Number(text) <= 0) {
+    throw httpError(400, 'Amount must be greater than zero.')
+  }
+  return text.replace(/^0+(?=\d)/, '')
+}
+
+function date(value: unknown, label: string): string {
+  const text = String(value ?? '')
+  const parsed = new Date(`${text}T00:00:00Z`)
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(text) ||
+    Number.isNaN(parsed.getTime()) ||
+    parsed.toISOString().slice(0, 10) !== text
+  ) {
+    throw httpError(400, `${label} must be a valid date.`)
+  }
+  return text
+}
+
+function id(value: unknown, label = 'ID'): number {
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw httpError(400, `${label} is invalid.`)
+  }
+  return parsed
+}
+
+const requireAuth: RequestHandler = (request, _response, next) => {
+  if (!request.session.userId) return next(httpError(401, 'Please sign in.'))
+  next()
+}
+
+async function membershipFor(userId: number): Promise<HouseholdMembership | null> {
+  const [rows] = await pool.execute<(HouseholdMembership & RowDataPacket)[]>(
+    `SELECT hm.household_id AS householdId, hm.role, h.name, h.currency
+       FROM household_members hm
+       JOIN households h ON h.id = hm.household_id
+      WHERE hm.user_id = ?
+      LIMIT 1`,
+    [userId],
+  )
+  return rows[0] || null
+}
+
+const requireMembership: AsyncHandler = async (request, _response, next) => {
+  const membership = await membershipFor(request.session.userId!)
+  if (!membership) return next(httpError(403, 'This user does not belong to a household.'))
+  request.membership = membership
+  next()
+}
+
+interface PeriodRecord extends RowDataPacket {
+  id: number
+  label: string
+  startDate: string
+  endDate: string
+  status: 'open' | 'closed'
+}
+
+interface UserRow extends RowDataPacket {
+  id: number
+  email: string
+  displayName: string
+}
+
+interface AuthUserRow extends UserRow {
+  passwordHash: string
+}
+
+interface MemberRow extends RowDataPacket {
+  id: number
+  displayName: string
+  role: 'owner' | 'member'
+}
+
+interface SettlementMemberRow extends RowDataPacket {
+  id: number
+  name: string
+  income: string
+}
+
+interface ExpenseRow extends RowDataPacket {
+  id: number
+  expenseDate: string
+  description: string
+  category: string | null
+  amount: string
+  paidBy: number
+  payerName: string
+  notes: string | null
+}
+
+interface ExpenseLookupRow extends RowDataPacket {
+  id: number
+  periodId: number
+}
+
+interface ExpenseStatusRow extends RowDataPacket {
+  id: number
+  status: 'open' | 'closed'
+}
+
+async function getPeriod(
+  periodId: number,
+  householdId: number,
+  connection: Pool | PoolConnection = pool,
+): Promise<PeriodRecord> {
+  const [rows] = await connection.execute<PeriodRecord[]>(
+    `SELECT id, label, DATE_FORMAT(start_date, '%Y-%m-%d') AS startDate,
+            DATE_FORMAT(end_date, '%Y-%m-%d') AS endDate, status
+       FROM periods
+      WHERE id = ? AND household_id = ?`,
+    [periodId, householdId],
+  )
+  if (!rows[0]) throw httpError(404, 'Calculation period not found.')
+  return rows[0]
+}
+
+async function assertMember(
+  userId: number,
+  householdId: number,
+  connection: Pool | PoolConnection = pool,
+): Promise<void> {
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    'SELECT 1 FROM household_members WHERE user_id = ? AND household_id = ?',
+    [userId, householdId],
+  )
+  if (!rows[0]) throw httpError(400, 'Selected payer is not a household member.')
+}
+
+function assertEditable(period: Pick<PeriodRecord, 'status'>): void {
+  if (period.status === 'closed') {
+    throw httpError(409, 'Reopen this period before changing its income or expenses.')
+  }
+}
+
+api.post(
+  '/auth/login',
+  loginLimiter,
+  asyncRoute(async (request, response) => {
+    const email = String(request.body.email ?? '').trim().toLowerCase()
+    const password = String(request.body.password ?? '')
+
+    const [rows] = await pool.execute<AuthUserRow[]>(
+      'SELECT id, email, display_name AS displayName, password_hash AS passwordHash FROM users WHERE email = ?',
+      [email],
+    )
+    const user = rows[0]
+    if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+      throw httpError(401, 'Email or password is incorrect.')
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      request.session.regenerate((error) => {
+        if (error) reject(error)
+        else resolve()
+      })
+    })
+    request.session.userId = user.id
+    response.json({
+      user: { id: user.id, email: user.email, displayName: user.displayName },
+    })
+  }),
+)
+
+api.post('/auth/logout', requireAuth, (request, response, next) => {
+  request.session.destroy((error) => {
+    if (error) return next(error)
+    response.clearCookie('finance.sid')
+    response.status(204).end()
+  })
+})
+
+api.get(
+  '/auth/me',
+  requireAuth,
+  asyncRoute(async (request, response) => {
+    const [rows] = await pool.execute<UserRow[]>(
+      'SELECT id, email, display_name AS displayName FROM users WHERE id = ?',
+      [request.session.userId!],
+    )
+    if (!rows[0]) throw httpError(401, 'Please sign in.')
+    response.json({ user: rows[0] })
+  }),
+)
+
+api.use(requireAuth, asyncRoute(requireMembership))
+
+api.get(
+  '/bootstrap',
+  asyncRoute(async (request, response) => {
+    const [userRows] = await pool.execute<UserRow[]>(
+      'SELECT id, email, display_name AS displayName FROM users WHERE id = ?',
+      [request.session.userId!],
+    )
+    const [memberRows] = await pool.execute<MemberRow[]>(
+      `SELECT u.id, u.display_name AS displayName, hm.role
+         FROM household_members hm
+         JOIN users u ON u.id = hm.user_id
+        WHERE hm.household_id = ?
+        ORDER BY hm.created_at, u.id`,
+      [request.membership.householdId],
+    )
+    response.json({
+      user: userRows[0],
+      household: {
+        id: request.membership.householdId,
+        name: request.membership.name,
+        currency: request.membership.currency,
+        role: request.membership.role,
+        members: memberRows,
+      },
+    })
+  }),
+)
+
+api.put(
+  '/household',
+  asyncRoute(async (request, response) => {
+    if (request.membership.role !== 'owner') {
+      throw httpError(403, 'Only the household owner can change these settings.')
+    }
+    const name = requiredText(request.body.name, 'Household name', 100)
+    const currency = String(request.body.currency ?? '').trim().toUpperCase()
+    if (!/^[A-Z]{3}$/.test(currency)) {
+      throw httpError(400, 'Currency must be a three-letter code such as USD or JPY.')
+    }
+    await pool.execute('UPDATE households SET name = ?, currency = ? WHERE id = ?', [
+      name,
+      currency,
+      request.membership.householdId,
+    ])
+    response.json({ household: { ...request.membership, name, currency } })
+  }),
+)
+
+api.get(
+  '/periods',
+  asyncRoute(async (request, response) => {
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT p.id, p.label,
+              DATE_FORMAT(p.start_date, '%Y-%m-%d') AS startDate,
+              DATE_FORMAT(p.end_date, '%Y-%m-%d') AS endDate,
+              p.status,
+              COALESCE(SUM(e.amount), 0) AS totalExpenses,
+              COUNT(e.id) AS expenseCount
+         FROM periods p
+         LEFT JOIN expenses e ON e.period_id = p.id
+        WHERE p.household_id = ?
+        GROUP BY p.id
+        ORDER BY p.start_date DESC, p.id DESC`,
+      [request.membership.householdId],
+    )
+    response.json({ periods: rows })
+  }),
+)
+
+api.post(
+  '/periods',
+  asyncRoute(async (request, response) => {
+    const label = requiredText(request.body.label, 'Period name', 100)
+    const startDate = date(request.body.startDate, 'Start date')
+    const endDate = date(request.body.endDate, 'End date')
+    if (startDate > endDate) throw httpError(400, 'End date must be on or after the start date.')
+
+    const [result] = await pool.execute<ResultSetHeader>(
+      `INSERT INTO periods (household_id, label, start_date, end_date, created_by)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        request.membership.householdId,
+        label,
+        startDate,
+        endDate,
+        request.session.userId!,
+      ],
+    )
+    const period = await getPeriod(result.insertId, request.membership.householdId)
+    response.status(201).json({ period })
+  }),
+)
+
+api.get(
+  '/periods/:periodId',
+  asyncRoute(async (request, response) => {
+    const periodId = id(request.params.periodId, 'Period ID')
+    const period = await getPeriod(periodId, request.membership.householdId)
+    const [memberRows] = await pool.execute<SettlementMemberRow[]>(
+      `SELECT u.id, u.display_name AS name, COALESCE(i.amount, 0) AS income
+         FROM household_members hm
+         JOIN users u ON u.id = hm.user_id
+         LEFT JOIN incomes i ON i.user_id = u.id AND i.period_id = ?
+        WHERE hm.household_id = ?
+        ORDER BY hm.created_at, u.id`,
+      [periodId, request.membership.householdId],
+    )
+    const [expenseRows] = await pool.execute<ExpenseRow[]>(
+      `SELECT e.id, DATE_FORMAT(e.expense_date, '%Y-%m-%d') AS expenseDate,
+              e.description, e.category, e.amount, e.paid_by AS paidBy,
+              u.display_name AS payerName, e.notes
+         FROM expenses e
+         JOIN users u ON u.id = e.paid_by
+        WHERE e.period_id = ?
+        ORDER BY e.expense_date DESC, e.id DESC`,
+      [periodId],
+    )
+    const summary = calculateSettlement(
+      memberRows,
+      expenseRows.map((expense) => ({
+        amount: expense.amount,
+        paidBy: expense.paidBy,
+      })),
+    )
+    response.json({ period, members: memberRows, expenses: expenseRows, summary })
+  }),
+)
+
+api.put(
+  '/periods/:periodId',
+  asyncRoute(async (request, response) => {
+    const periodId = id(request.params.periodId, 'Period ID')
+    const current = await getPeriod(periodId, request.membership.householdId)
+    const label = requiredText(request.body.label ?? current.label, 'Period name', 100)
+    const startDate = date(request.body.startDate ?? current.startDate, 'Start date')
+    const endDate = date(request.body.endDate ?? current.endDate, 'End date')
+    const status = request.body.status ?? current.status
+    if (!['open', 'closed'].includes(status)) throw httpError(400, 'Status is invalid.')
+    if (startDate > endDate) throw httpError(400, 'End date must be on or after the start date.')
+    await pool.execute(
+      'UPDATE periods SET label = ?, start_date = ?, end_date = ?, status = ? WHERE id = ?',
+      [label, startDate, endDate, status, periodId],
+    )
+    response.json({
+      period: await getPeriod(periodId, request.membership.householdId),
+    })
+  }),
+)
+
+api.put(
+  '/periods/:periodId/incomes/:userId',
+  asyncRoute(async (request, response) => {
+    const periodId = id(request.params.periodId, 'Period ID')
+    const userId = id(request.params.userId, 'User ID')
+    const period = await getPeriod(periodId, request.membership.householdId)
+    assertEditable(period)
+    await assertMember(userId, request.membership.householdId)
+    const amount = money(request.body.amount, { allowZero: true })
+    await pool.execute(
+      `INSERT INTO incomes (period_id, user_id, amount)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE amount = VALUES(amount)`,
+      [periodId, userId, amount],
+    )
+    response.json({ income: { periodId, userId, amount } })
+  }),
+)
+
+api.post(
+  '/periods/:periodId/expenses',
+  asyncRoute(async (request, response) => {
+    const periodId = id(request.params.periodId, 'Period ID')
+    const period = await getPeriod(periodId, request.membership.householdId)
+    assertEditable(period)
+    const paidBy = id(request.body.paidBy, 'Payer')
+    await assertMember(paidBy, request.membership.householdId)
+    const expenseDate = date(request.body.expenseDate, 'Expense date')
+    if (expenseDate < period.startDate || expenseDate > period.endDate) {
+      throw httpError(400, 'Expense date must fall within this calculation period.')
+    }
+    const description = requiredText(request.body.description, 'Description', 160)
+    const category = optionalText(request.body.category, 'Category', 80)
+    const amount = money(request.body.amount)
+    const notes = optionalText(request.body.notes, 'Notes', 2000)
+
+    const [result] = await pool.execute<ResultSetHeader>(
+      `INSERT INTO expenses
+         (period_id, expense_date, description, category, amount, paid_by, notes, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        periodId,
+        expenseDate,
+        description,
+        category,
+        amount,
+        paidBy,
+        notes,
+        request.session.userId!,
+      ],
+    )
+    response.status(201).json({ expense: { id: result.insertId } })
+  }),
+)
+
+api.put(
+  '/expenses/:expenseId',
+  asyncRoute(async (request, response) => {
+    const expenseId = id(request.params.expenseId, 'Expense ID')
+    await withTransaction(async (connection) => {
+      const [rows] = await connection.execute<ExpenseLookupRow[]>(
+        `SELECT e.id, e.period_id AS periodId
+           FROM expenses e
+           JOIN periods p ON p.id = e.period_id
+          WHERE e.id = ? AND p.household_id = ?
+          FOR UPDATE`,
+        [expenseId, request.membership.householdId],
+      )
+      if (!rows[0]) throw httpError(404, 'Expense not found.')
+      const period = await getPeriod(
+        rows[0].periodId,
+        request.membership.householdId,
+        connection,
+      )
+      assertEditable(period)
+      const paidBy = id(request.body.paidBy, 'Payer')
+      await assertMember(paidBy, request.membership.householdId, connection)
+      const expenseDate = date(request.body.expenseDate, 'Expense date')
+      if (expenseDate < period.startDate || expenseDate > period.endDate) {
+        throw httpError(400, 'Expense date must fall within this calculation period.')
+      }
+      await connection.execute(
+        `UPDATE expenses
+            SET expense_date = ?, description = ?, category = ?, amount = ?,
+                paid_by = ?, notes = ?
+          WHERE id = ?`,
+        [
+          expenseDate,
+          requiredText(request.body.description, 'Description', 160),
+          optionalText(request.body.category, 'Category', 80),
+          money(request.body.amount),
+          paidBy,
+          optionalText(request.body.notes, 'Notes', 2000),
+          expenseId,
+        ],
+      )
+    })
+    response.json({ expense: { id: expenseId } })
+  }),
+)
+
+api.delete(
+  '/expenses/:expenseId',
+  asyncRoute(async (request, response) => {
+    const expenseId = id(request.params.expenseId, 'Expense ID')
+    const [rows] = await pool.execute<ExpenseStatusRow[]>(
+      `SELECT e.id, p.status
+         FROM expenses e
+         JOIN periods p ON p.id = e.period_id
+        WHERE e.id = ? AND p.household_id = ?`,
+      [expenseId, request.membership.householdId],
+    )
+    if (!rows[0]) throw httpError(404, 'Expense not found.')
+    assertEditable(rows[0])
+    await pool.execute('DELETE FROM expenses WHERE id = ?', [expenseId])
+    response.status(204).end()
+  }),
+)
