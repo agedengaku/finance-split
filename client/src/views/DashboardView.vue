@@ -101,7 +101,11 @@ onMounted(load)
     <form v-if="showCreate" class="card mb-8 p-5 sm:p-6" @submit.prevent="createPeriod">
       <div class="mb-5 flex items-center justify-between">
         <h2 class="text-lg font-semibold">Create a calculation period</h2>
-        <button class="text-sm text-ink-500 hover:text-ink-950" type="button" @click="showCreate = false">
+        <button
+          class="text-sm text-ink-500 hover:text-ink-950"
+          type="button"
+          @click="showCreate = false"
+        >
           Cancel
         </button>
       </div>
@@ -126,9 +130,7 @@ onMounted(load)
       </div>
     </form>
 
-    <div v-if="loading" class="card p-10 text-center text-sm text-ink-500">
-      Loading periods…
-    </div>
+    <div v-if="loading" class="card p-10 text-center text-sm text-ink-500">Loading periods…</div>
 
     <div v-else-if="!periods.length" class="card border-dashed p-10 text-center sm:p-14">
       <div class="mx-auto mb-4 grid size-12 place-items-center rounded-2xl bg-mint-50 text-2xl">
@@ -162,7 +164,9 @@ onMounted(load)
                 {{ formatDate(period.startDate) }} – {{ formatDate(period.endDate) }}
               </p>
             </div>
-            <span class="text-xl text-slate-300 transition group-hover:translate-x-1 group-hover:text-mint-600">
+            <span
+              class="text-xl text-slate-300 transition group-hover:translate-x-1 group-hover:text-mint-600"
+            >
               →
             </span>
           </div>

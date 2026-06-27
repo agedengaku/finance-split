@@ -158,9 +158,7 @@ onMounted(loadReport)
       {{ error }}
     </div>
 
-    <div v-if="loading" class="card p-10 text-center text-sm text-ink-500">
-      Loading trends…
-    </div>
+    <div v-if="loading" class="card p-10 text-center text-sm text-ink-500">Loading trends…</div>
 
     <div v-else-if="!periods.length" class="card border-dashed p-10 text-center sm:p-14">
       <div class="mx-auto mb-4 grid size-12 place-items-center rounded-2xl bg-mint-50 text-xl">
@@ -279,7 +277,9 @@ onMounted(loadReport)
       </div>
 
       <div class="card mt-6 overflow-hidden">
-        <div class="grid grid-cols-[1fr_auto_auto] gap-3 border-b bg-slate-50 px-5 py-3 text-xs font-semibold text-ink-500 uppercase">
+        <div
+          class="grid grid-cols-[1fr_auto_auto] gap-3 border-b bg-slate-50 px-5 py-3 text-xs font-semibold text-ink-500 uppercase"
+        >
           <span>Period</span>
           <span class="text-right">Income</span>
           <span class="text-right">Expenses</span>
@@ -308,9 +308,7 @@ onMounted(loadReport)
       <div class="card mt-6 overflow-hidden">
         <div class="border-b px-5 py-4">
           <h2 class="font-semibold">Expenses by category</h2>
-          <p class="mt-1 text-xs text-ink-500">
-            Ranked by total spending for {{ selectedYear }}.
-          </p>
+          <p class="mt-1 text-xs text-ink-500">Ranked by total spending for {{ selectedYear }}.</p>
         </div>
         <div v-if="categories.length" class="divide-y">
           <div

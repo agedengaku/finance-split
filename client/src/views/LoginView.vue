@@ -17,8 +17,7 @@ async function submit() {
     await signIn(form)
     await router.push(String(route.query.redirect || '/'))
   } catch (requestError: unknown) {
-    error.value =
-      requestError instanceof ApiError ? requestError.message : 'Unable to sign in.'
+    error.value = requestError instanceof ApiError ? requestError.message : 'Unable to sign in.'
   } finally {
     submitting.value = false
   }
@@ -75,9 +74,7 @@ async function submit() {
           </button>
         </div>
       </form>
-      <p class="mt-5 text-center text-xs text-ink-500">
-        This is a private household application.
-      </p>
+      <p class="mt-5 text-center text-xs text-ink-500">This is a private household application.</p>
     </div>
   </main>
 </template>

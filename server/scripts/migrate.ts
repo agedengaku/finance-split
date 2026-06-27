@@ -34,10 +34,7 @@ try {
       'utf8',
     )
     await connection.query(migration)
-    await connection.execute(
-      'INSERT INTO schema_migrations (version) VALUES (?)',
-      [version],
-    )
+    await connection.execute('INSERT INTO schema_migrations (version) VALUES (?)', [version])
     console.log(`Applied migration ${version}.`)
   }
 

@@ -63,10 +63,7 @@ export function calculateSettlement(
     if (payer) payer.paidYen += amount
   }
 
-  const totalIncome = normalized.reduce(
-    (total, member) => total + member.incomeYen,
-    0n,
-  )
+  const totalIncome = normalized.reduce((total, member) => total + member.incomeYen, 0n)
 
   if (totalIncome === 0n) {
     return {
@@ -97,8 +94,7 @@ export function calculateSettlement(
   })
 
   let unallocated =
-    totalExpenses -
-    allocations.reduce((total, item) => total + item.fairShareYen, 0n)
+    totalExpenses - allocations.reduce((total, item) => total + item.fairShareYen, 0n)
   allocations
     .sort((a, b) => (a.remainder > b.remainder ? -1 : a.remainder < b.remainder ? 1 : 0))
     .forEach((item) => {
@@ -113,9 +109,7 @@ export function calculateSettlement(
       id: member.id,
       name: member.name,
       income: String(member.incomeYen),
-      percentage: Number(
-        ((member.incomeYen * 10000n) / totalIncome).toString(),
-      ) / 100,
+      percentage: Number(((member.incomeYen * 10000n) / totalIncome).toString()) / 100,
       fairShare: String(fairShareYen),
       paid: String(member.paidYen),
       balanceYen: member.paidYen - fairShareYen,

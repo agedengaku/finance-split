@@ -39,19 +39,19 @@ date,description,category,amount,paid_by,notes
 
 The required columns are:
 
-| Column | Format |
-| --- | --- |
-| `description` | Expense description, up to 160 characters |
-| `amount` | Positive whole-yen amount, such as `8500` |
-| `paid_by` | Household member's display name; matching is case-insensitive |
+| Column        | Format                                                        |
+| ------------- | ------------------------------------------------------------- |
+| `description` | Expense description, up to 160 characters                     |
+| `amount`      | Positive whole-yen amount, such as `8500`                     |
+| `paid_by`     | Household member's display name; matching is case-insensitive |
 
 The optional columns are:
 
-| Column | Format |
-| --- | --- |
-| `date` | `YYYY-MM-DD`; when provided, it must fall within the selected calculation period |
-| `category` | Category name, up to 80 characters |
-| `notes` | Additional details, up to 2,000 characters |
+| Column     | Format                                                                           |
+| ---------- | -------------------------------------------------------------------------------- |
+| `date`     | `YYYY-MM-DD`; when provided, it must fall within the selected calculation period |
+| `category` | Category name, up to 80 characters                                               |
+| `notes`    | Additional details, up to 2,000 characters                                       |
 
 Example:
 
@@ -109,8 +109,21 @@ The Vue app runs at `http://localhost:5173`; Vite proxies API requests to Expres
 npm run check
 ```
 
-This runs the settlement unit tests, strict client and server type checks, and
-both production builds.
+This runs ESLint, Stylelint, Prettier's formatting check, the settlement unit
+tests, strict client and server type checks, and both production builds.
+
+Useful commands while editing:
+
+```sh
+npm run lint
+npm run lint:fix
+npm run format
+npm run format:check
+```
+
+ESLint uses the recommended JavaScript, TypeScript, and Vue rules. Stylelint
+uses its standard CSS rules and supports styles inside Vue components. Prettier
+is the single source of truth for code formatting.
 
 ## Production
 

@@ -178,8 +178,7 @@ async function saveIncome(member: Member) {
     })
     await load()
   } catch (requestError: unknown) {
-    error.value =
-      requestError instanceof ApiError ? requestError.message : 'Unable to save income.'
+    error.value = requestError instanceof ApiError ? requestError.message : 'Unable to save income.'
   } finally {
     saving.value = false
   }
@@ -354,9 +353,7 @@ async function undoImport(batch: ImportBatch) {
     await load()
   } catch (requestError: unknown) {
     error.value =
-      requestError instanceof ApiError
-        ? requestError.message
-        : 'Unable to undo the import.'
+      requestError instanceof ApiError ? requestError.message : 'Unable to undo the import.'
   }
 }
 
@@ -394,9 +391,7 @@ watch(() => route.params.id, load)
 </script>
 
 <template>
-  <div v-if="loading" class="card p-10 text-center text-sm text-ink-500">
-    Loading calculation…
-  </div>
+  <div v-if="loading" class="card p-10 text-center text-sm text-ink-500">Loading calculation…</div>
 
   <section v-else-if="period">
     <RouterLink
@@ -473,7 +468,9 @@ watch(() => route.params.id, load)
             <div class="flex items-center justify-between gap-4">
               <div>
                 <p class="font-medium">{{ member.name }}</p>
-                <p class="mt-0.5 text-xs text-ink-500">{{ member.percentage.toFixed(2) }}% of income</p>
+                <p class="mt-0.5 text-xs text-ink-500">
+                  {{ member.percentage.toFixed(2) }}% of income
+                </p>
               </div>
               <div class="text-right">
                 <p class="font-semibold">{{ formatYen(member.fairShare) }}</p>
@@ -507,8 +504,11 @@ watch(() => route.params.id, load)
             <div>
               <p class="font-semibold">{{ member.name }}</p>
               <p class="mt-0.5 text-xs text-ink-500">
-                {{ summary.members.find((item) => String(item.id) === String(member.id))?.percentage.toFixed(2) }}%
-                of total income
+                {{
+                  summary.members
+                    .find((item) => String(item.id) === String(member.id))
+                    ?.percentage.toFixed(2)
+                }}% of total income
               </p>
             </div>
             <div class="flex max-w-52 items-center gap-2">
@@ -547,12 +547,10 @@ watch(() => route.params.id, load)
             Save a template once and it will be copied into each new period automatically.
           </p>
         </div>
-        <button
-          class="button-secondary"
-          type="button"
-          @click="toggleRecurringForm"
-        >
-          {{ showRecurringForm || editingRecurringExpenseId ? 'Hide form' : 'Add recurring expense' }}
+        <button class="button-secondary" type="button" @click="toggleRecurringForm">
+          {{
+            showRecurringForm || editingRecurringExpenseId ? 'Hide form' : 'Add recurring expense'
+          }}
         </button>
       </div>
 
@@ -599,7 +597,9 @@ watch(() => route.params.id, load)
             <div>
               <label class="label" for="recurringAmount">Amount</label>
               <div class="relative">
-                <span class="pointer-events-none absolute top-2.5 left-3.5 text-sm text-ink-500">¥</span>
+                <span class="pointer-events-none absolute top-2.5 left-3.5 text-sm text-ink-500"
+                  >¥</span
+                >
                 <input
                   id="recurringAmount"
                   v-model="recurringExpenseForm.amount"
@@ -669,7 +669,9 @@ watch(() => route.params.id, load)
               Cancel
             </button>
             <button class="button-primary" type="submit" :disabled="saving">
-              {{ saving ? 'Saving…' : editingRecurringExpenseId ? 'Update template' : 'Save template' }}
+              {{
+                saving ? 'Saving…' : editingRecurringExpenseId ? 'Update template' : 'Save template'
+              }}
             </button>
           </div>
         </form>
@@ -696,10 +698,18 @@ watch(() => route.params.id, load)
                 </p>
               </div>
               <div class="flex gap-3 text-sm">
-                <button class="font-medium text-mint-700 hover:text-mint-600" type="button" @click="editRecurringExpense(expense)">
+                <button
+                  class="font-medium text-mint-700 hover:text-mint-600"
+                  type="button"
+                  @click="editRecurringExpense(expense)"
+                >
                   Edit
                 </button>
-                <button class="font-medium text-red-600 hover:text-red-500" type="button" @click="removeRecurringExpense(expense)">
+                <button
+                  class="font-medium text-red-600 hover:text-red-500"
+                  type="button"
+                  @click="removeRecurringExpense(expense)"
+                >
                   Delete
                 </button>
               </div>
@@ -808,7 +818,9 @@ watch(() => route.params.id, load)
         <div>
           <label class="label" for="amount">Amount</label>
           <div class="relative">
-            <span class="pointer-events-none absolute top-2.5 left-3.5 text-sm text-ink-500">¥</span>
+            <span class="pointer-events-none absolute top-2.5 left-3.5 text-sm text-ink-500"
+              >¥</span
+            >
             <input
               id="amount"
               v-model="expenseForm.amount"
@@ -872,7 +884,9 @@ watch(() => route.params.id, load)
       </div>
 
       <div v-else class="card overflow-hidden">
-        <div class="hidden grid-cols-[110px_1fr_130px_150px_100px] gap-4 border-b bg-slate-50 px-5 py-3 text-xs font-semibold text-ink-500 md:grid">
+        <div
+          class="hidden grid-cols-[110px_1fr_130px_150px_100px] gap-4 border-b bg-slate-50 px-5 py-3 text-xs font-semibold text-ink-500 md:grid"
+        >
           <div>Date</div>
           <div>Expense</div>
           <div>Paid by</div>
@@ -890,15 +904,25 @@ watch(() => route.params.id, load)
             </p>
             <div>
               <p class="font-medium">{{ expense.description }}</p>
-              <p v-if="expense.category" class="mt-0.5 text-xs text-ink-500">{{ expense.category }}</p>
+              <p v-if="expense.category" class="mt-0.5 text-xs text-ink-500">
+                {{ expense.category }}
+              </p>
             </div>
             <p class="text-sm text-ink-700">{{ expense.payerName }}</p>
             <p class="text-lg font-semibold md:text-right">{{ formatYen(expense.amount) }}</p>
             <div v-if="!isClosed" class="flex gap-3 text-sm md:justify-end">
-              <button class="font-medium text-mint-700 hover:text-mint-600" type="button" @click="editExpense(expense)">
+              <button
+                class="font-medium text-mint-700 hover:text-mint-600"
+                type="button"
+                @click="editExpense(expense)"
+              >
                 Edit
               </button>
-              <button class="font-medium text-red-600 hover:text-red-500" type="button" @click="removeExpense(expense)">
+              <button
+                class="font-medium text-red-600 hover:text-red-500"
+                type="button"
+                @click="removeExpense(expense)"
+              >
                 Delete
               </button>
             </div>

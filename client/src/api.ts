@@ -25,10 +25,7 @@ export async function api<T = unknown>(path: string, options: ApiOptions = {}): 
 
   if (!response.ok) {
     const payload = (await response.json().catch(() => ({}))) as { error?: string }
-    throw new ApiError(
-      payload.error || 'The request could not be completed.',
-      response.status,
-    )
+    throw new ApiError(payload.error || 'The request could not be completed.', response.status)
   }
 
   return (response.status === 204 ? null : response.json()) as Promise<T>

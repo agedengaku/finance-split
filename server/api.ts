@@ -6,26 +6,19 @@ import express, {
   type Response,
 } from 'express'
 import rateLimit from 'express-rate-limit'
-import type {
-  Pool,
-  PoolConnection,
-  ResultSetHeader,
-  RowDataPacket,
-} from 'mysql2/promise'
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { pool, withTransaction } from './db.js'
 import { calculateSettlement } from './settlement.js'
 import type { HouseholdMembership } from './types.js'
 
 export const api = express.Router()
 
-type AsyncHandler = (
-  request: Request,
-  response: Response,
-  next: NextFunction,
-) => Promise<unknown>
+type AsyncHandler = (request: Request, response: Response, next: NextFunction) => Promise<unknown>
 
-const asyncRoute = (handler: AsyncHandler): RequestHandler => (request, response, next) =>
-  Promise.resolve(handler(request, response, next)).catch(next)
+const asyncRoute =
+  (handler: AsyncHandler): RequestHandler =>
+  (request, response, next) =>
+    Promise.resolve(handler(request, response, next)).catch(next)
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -285,7 +278,9 @@ api.post(
   '/auth/login',
   loginLimiter,
   asyncRoute(async (request, response) => {
-    const email = String(request.body.email ?? '').trim().toLowerCase()
+    const email = String(request.body.email ?? '')
+      .trim()
+      .toLowerCase()
     const password = String(request.body.password ?? '')
 
     const [rows] = await pool.execute<AuthUserRow[]>(
@@ -368,7 +363,9 @@ api.put(
       throw httpError(403, 'Only the household owner can change these settings.')
     }
     const name = requiredText(request.body.name, 'Household name', 100)
-    const currency = String(request.body.currency ?? '').trim().toUpperCase()
+    const currency = String(request.body.currency ?? '')
+      .trim()
+      .toUpperCase()
     if (!/^[A-Z]{3}$/.test(currency)) {
       throw httpError(400, 'Currency must be a three-letter code such as USD or JPY.')
     }
@@ -441,11 +438,7 @@ api.get(
           AND p.start_date >= ?
           AND p.start_date < ?
         ORDER BY p.start_date, p.id`,
-      [
-        request.membership.householdId,
-        `${year}-01-01`,
-        `${year + 1}-01-01`,
-      ],
+      [request.membership.householdId, `${year}-01-01`, `${year + 1}-01-01`],
     )
     const [categoryRows] = await pool.execute<RowDataPacket[]>(
       `SELECT category, totalExpenses, expenseCount
@@ -461,11 +454,7 @@ api.get(
             GROUP BY NULLIF(TRIM(e.category), '')
          ) categoryTotals
         ORDER BY category IS NULL, totalExpenses DESC, category`,
-      [
-        request.membership.householdId,
-        `${year}-01-01`,
-        `${year + 1}-01-01`,
-      ],
+      [request.membership.householdId, `${year}-01-01`, `${year + 1}-01-01`],
     )
 
     response.json({
@@ -489,13 +478,7 @@ api.post(
       const [result] = await connection.execute<ResultSetHeader>(
         `INSERT INTO periods (household_id, label, start_date, end_date, created_by)
          VALUES (?, ?, ?, ?, ?)`,
-        [
-          request.membership.householdId,
-          label,
-          startDate,
-          endDate,
-          request.session.userId!,
-        ],
+        [request.membership.householdId, label, startDate, endDate, request.session.userId!],
       )
       const created = await getPeriod(result.insertId, request.membership.householdId, connection)
       await applyRecurringExpensesToPeriod(
@@ -635,13 +618,8 @@ api.post(
           throw httpError(400, `Payer on CSV row ${index + 2} is not a household member.`)
         }
         const rawDate = String(row.expenseDate ?? '').trim()
-        const expenseDate = rawDate
-          ? date(rawDate, `Date on CSV row ${index + 2}`)
-          : null
-        if (
-          expenseDate &&
-          (expenseDate < period.startDate || expenseDate > period.endDate)
-        ) {
+        const expenseDate = rawDate ? date(rawDate, `Date on CSV row ${index + 2}`) : null
+        if (expenseDate && (expenseDate < period.startDate || expenseDate > period.endDate)) {
           throw httpError(
             400,
             `Date on CSV row ${index + 2} falls outside this calculation period.`,
@@ -649,11 +627,7 @@ api.post(
         }
         return {
           expenseDate,
-          description: requiredText(
-            row.description,
-            `Description on CSV row ${index + 2}`,
-            160,
-          ),
+          description: requiredText(row.description, `Description on CSV row ${index + 2}`, 160),
           category: optionalText(row.category, `Category on CSV row ${index + 2}`, 80),
           amount: money(row.amount),
           paidBy,
@@ -666,13 +640,7 @@ api.post(
         `INSERT INTO expense_imports
            (period_id, source_name, row_count, total_amount, imported_by)
          VALUES (?, ?, ?, ?, ?)`,
-        [
-          periodId,
-          sourceName,
-          rows.length,
-          totalAmount.toString(),
-          request.session.userId!,
-        ],
+        [periodId, sourceName, rows.length, totalAmount.toString(), request.session.userId!],
       )
 
       for (const row of rows) {
@@ -885,11 +853,7 @@ api.put(
         [expenseId, request.membership.householdId],
       )
       if (!rows[0]) throw httpError(404, 'Expense not found.')
-      const period = await getPeriod(
-        rows[0].periodId,
-        request.membership.householdId,
-        connection,
-      )
+      const period = await getPeriod(rows[0].periodId, request.membership.householdId, connection)
       assertEditable(period)
       const paidBy = id(request.body.paidBy, 'Payer')
       await assertMember(paidBy, request.membership.householdId, connection)

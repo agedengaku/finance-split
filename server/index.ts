@@ -10,20 +10,18 @@ import { pool } from './db.js'
 
 const app = express()
 const MySQLStore = MySQLStoreFactory(session)
-const sessionStore = new MySQLStore(
-  {
-    ...config.db,
-    createDatabaseTable: true,
-    schema: {
-      tableName: 'sessions',
-      columnNames: {
-        session_id: 'session_id',
-        expires: 'expires',
-        data: 'data',
-      },
+const sessionStore = new MySQLStore({
+  ...config.db,
+  createDatabaseTable: true,
+  schema: {
+    tableName: 'sessions',
+    columnNames: {
+      session_id: 'session_id',
+      expires: 'expires',
+      data: 'data',
     },
   },
-)
+})
 
 app.set('trust proxy', 1)
 app.disable('x-powered-by')

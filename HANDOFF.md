@@ -44,3 +44,4 @@ Status notes:
 - Recurring expense templates are already in place
 - Editing a recurring template does not rewrite already-created period expenses
 - The app is set up for local development and can be viewed on localhost
+- ESLint, Stylelint, Prettier, and EditorConfig are configured for contributors

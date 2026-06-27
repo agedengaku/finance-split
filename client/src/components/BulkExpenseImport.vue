@@ -58,15 +58,15 @@ const selectedRows = computed(() =>
 const selectedTotal = computed(() =>
   selectedRows.value.reduce((total, row) => total + BigInt(row.expense.amount || '0'), 0n),
 )
-const duplicateCount = computed(
-  () => previewRows.value.filter((row) => row.duplicate).length,
-)
-const errorCount = computed(
-  () => previewRows.value.filter((row) => row.errors.length > 0).length,
-)
+const duplicateCount = computed(() => previewRows.value.filter((row) => row.duplicate).length)
+const errorCount = computed(() => previewRows.value.filter((row) => row.errors.length > 0).length)
 
 function normalizeHeader(header: string): string {
-  return header.replace(/^\uFEFF/, '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+  return header
+    .replace(/^\uFEFF/, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_')
 }
 
 function normalizeText(value: unknown): string {
@@ -81,14 +81,7 @@ function downloadTemplate() {
   const payer = props.members[0]?.name || 'Payer name'
   const content = [
     'date,description,category,amount,paid_by,notes',
-    [
-      props.startDate,
-      'Example expense',
-      'Household',
-      '1000',
-      csvCell(payer),
-      '',
-    ].join(','),
+    [props.startDate, 'Example expense', 'Household', '1000', csvCell(payer), ''].join(','),
   ].join('\n')
   const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }))
   const link = document.createElement('a')
@@ -98,7 +91,9 @@ function downloadTemplate() {
   URL.revokeObjectURL(url)
 }
 
-function duplicateKey(expense: Pick<ImportExpense, 'expenseDate' | 'description' | 'amount' | 'paidBy'>) {
+function duplicateKey(
+  expense: Pick<ImportExpense, 'expenseDate' | 'description' | 'amount' | 'paidBy'>,
+) {
   return [
     expense.expenseDate,
     expense.description.trim().toLowerCase(),
@@ -133,8 +128,7 @@ function parseRows(rows: Record<string, unknown>[]) {
     const payerValue = normalizeText(row.paid_by ?? row.payer ?? row.paidby)
     const payer = props.members.find(
       (member) =>
-        member.name.toLowerCase() === payerValue.toLowerCase() ||
-        String(member.id) === payerValue,
+        member.name.toLowerCase() === payerValue.toLowerCase() || String(member.id) === payerValue,
     )
     const expense: ImportExpense = {
       expenseDate: normalizeText(row.date ?? row.expense_date),
@@ -148,10 +142,7 @@ function parseRows(rows: Record<string, unknown>[]) {
     const errors: string[] = []
     if (expense.expenseDate) {
       if (!validDate(expense.expenseDate)) errors.push('Invalid date')
-      else if (
-        expense.expenseDate < props.startDate ||
-        expense.expenseDate > props.endDate
-      ) {
+      else if (expense.expenseDate < props.startDate || expense.expenseDate > props.endDate) {
         errors.push('Date outside period')
       }
     }
@@ -275,8 +266,7 @@ async function submitImport() {
         <p class="mt-3 text-xs leading-5 text-ink-500">
           Required columns:
           <code>description, amount, paid_by</code>. Optional columns:
-          <code>date, category, notes</code>. Use household names for
-          <code>paid_by</code>.
+          <code>date, category, notes</code>. Use household names for <code>paid_by</code>.
         </p>
         <button
           class="mt-2 text-xs font-semibold text-mint-700 hover:text-mint-600"
@@ -333,7 +323,11 @@ async function submitImport() {
               </tr>
             </thead>
             <tbody class="divide-y">
-              <tr v-for="row in previewRows" :key="row.line" :class="{ 'bg-red-50/50': row.errors.length }">
+              <tr
+                v-for="row in previewRows"
+                :key="row.line"
+                :class="{ 'bg-red-50/50': row.errors.length }"
+              >
                 <td class="px-3 py-3">
                   <input
                     v-model="row.include"
@@ -344,7 +338,9 @@ async function submitImport() {
                   />
                 </td>
                 <td class="px-3 py-3 text-ink-500">{{ row.line }}</td>
-                <td class="whitespace-nowrap px-3 py-3">{{ row.expense.expenseDate || 'No date' }}</td>
+                <td class="whitespace-nowrap px-3 py-3">
+                  {{ row.expense.expenseDate || 'No date' }}
+                </td>
                 <td class="px-3 py-3 font-medium">{{ row.expense.description || '—' }}</td>
                 <td class="px-3 py-3">{{ row.expense.payerName || '—' }}</td>
                 <td class="whitespace-nowrap px-3 py-3 text-right font-medium">
