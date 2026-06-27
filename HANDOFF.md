@@ -16,6 +16,7 @@ Core behavior:
 - Support manual expense entry and CSV import
 - Support multiple CSV uploads for the same period
 - Support recurring expense templates that auto-fill new periods
+- Editing a recurring template only changes future copies, not past periods
 
 CSV import rules:
 
@@ -40,4 +41,5 @@ Status notes:
 - Authentication is already in place
 - CSV import is already in place
 - Recurring expense templates are already in place
+- Editing a recurring template does not rewrite already-created period expenses
 - The app is set up for local development and can be viewed on localhost
