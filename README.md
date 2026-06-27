@@ -24,6 +24,57 @@ and calculates the final payment required to settle the period.
 - Secure HTTP-only session cookies, password hashing, rate limiting, and
   security headers
 
+## CSV expense imports
+
+Open a calculation period, select **Import CSV**, and upload a UTF-8 CSV file.
+You can also download a template directly from the import form.
+
+The first row must contain column headers:
+
+```csv
+date,description,category,amount,paid_by,notes
+```
+
+The required columns are:
+
+| Column | Format |
+| --- | --- |
+| `date` | `YYYY-MM-DD`; must fall within the selected calculation period |
+| `description` | Expense description, up to 160 characters |
+| `amount` | Positive whole-yen amount, such as `8500` |
+| `paid_by` | Household member's display name; matching is case-insensitive |
+
+The optional columns are:
+
+| Column | Format |
+| --- | --- |
+| `category` | Category name, up to 80 characters |
+| `notes` | Additional details, up to 2,000 characters |
+
+Example:
+
+```csv
+date,description,category,amount,paid_by,notes
+2026-06-02,Groceries,Food,8500,You,
+2026-06-05,Electricity,Utilities,12000,Partner,June bill
+2026-06-08,"Household supplies, kitchen",Household,3200,You,
+```
+
+Header names are normalized for capitalization, spaces, and hyphens.
+`expense_date` is also accepted for `date`, and `payer` is accepted for
+`paid_by`. Fields containing commas must use standard CSV double quotes.
+
+Each file may contain up to 500 expense rows and must be smaller than 2 MB.
+Invalid rows cannot be selected for import. Possible duplicates—matching date,
+description, amount, and payer—are shown in the preview and unchecked by
+default, but can be selected when the duplicate is intentional.
+
+CSV uploads append to existing expenses; they never replace a previous upload.
+Every upload is stored as a separate batch. Undoing a batch deletes only the
+expenses belonging to that batch. All selected rows are saved in one database
+transaction, so a server-side validation failure does not result in a partial
+import.
+
 ## Local setup
 
 1. Install Node.js 24 and MySQL 8 or MariaDB 10.6+.
