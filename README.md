@@ -11,6 +11,7 @@ and calculates the final payment required to settle the period.
 - Expense tracking by payer, date, and category
 - Repeatable CSV expense imports with validation, duplicate warnings, and batch undo
 - Recurring expense templates that can be copied into each new period
+- Yearly income and expense trend reports by calculation period and expense category
 - Exact whole-yen calculations with deterministic remainder allocation
 - Two-user authentication with database-backed sessions
 - Period closing and historical summaries

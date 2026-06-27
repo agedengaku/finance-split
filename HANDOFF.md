@@ -16,6 +16,7 @@ Core behavior:
 - Support manual expense entry and CSV import
 - Support multiple CSV uploads for the same period
 - Support recurring expense templates that auto-fill new periods
+- Show yearly household income and expense trends by calculation period, with ranked category totals
 - Editing a recurring template only changes future copies, not past periods
 
 CSV import rules:

@@ -402,6 +402,81 @@ api.get(
   }),
 )
 
+api.get(
+  '/reports/yearly',
+  asyncRoute(async (request, response) => {
+    const requestedYear = String(request.query.year ?? '').trim()
+    const currentYear = new Date().getUTCFullYear()
+    const year = requestedYear ? Number(requestedYear) : currentYear
+    if (!/^\d{4}$/.test(requestedYear || String(currentYear)) || year < 2000 || year > 2100) {
+      throw httpError(400, 'Year must be between 2000 and 2100.')
+    }
+
+    const [yearRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT DISTINCT YEAR(start_date) AS year
+         FROM periods
+        WHERE household_id = ?
+        ORDER BY year DESC`,
+      [request.membership.householdId],
+    )
+    const [periodRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT p.id, p.label,
+              DATE_FORMAT(p.start_date, '%Y-%m-%d') AS startDate,
+              DATE_FORMAT(p.end_date, '%Y-%m-%d') AS endDate,
+              p.status,
+              COALESCE(i.totalIncome, 0) AS totalIncome,
+              COALESCE(e.totalExpenses, 0) AS totalExpenses
+         FROM periods p
+         LEFT JOIN (
+           SELECT period_id, SUM(amount) AS totalIncome
+             FROM incomes
+            GROUP BY period_id
+         ) i ON i.period_id = p.id
+         LEFT JOIN (
+           SELECT period_id, SUM(amount) AS totalExpenses
+             FROM expenses
+            GROUP BY period_id
+         ) e ON e.period_id = p.id
+        WHERE p.household_id = ?
+          AND p.start_date >= ?
+          AND p.start_date < ?
+        ORDER BY p.start_date, p.id`,
+      [
+        request.membership.householdId,
+        `${year}-01-01`,
+        `${year + 1}-01-01`,
+      ],
+    )
+    const [categoryRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT category, totalExpenses, expenseCount
+         FROM (
+           SELECT NULLIF(TRIM(e.category), '') AS category,
+                  SUM(e.amount) AS totalExpenses,
+                  COUNT(e.id) AS expenseCount
+             FROM expenses e
+             JOIN periods p ON p.id = e.period_id
+            WHERE p.household_id = ?
+              AND p.start_date >= ?
+              AND p.start_date < ?
+            GROUP BY NULLIF(TRIM(e.category), '')
+         ) categoryTotals
+        ORDER BY category IS NULL, totalExpenses DESC, category`,
+      [
+        request.membership.householdId,
+        `${year}-01-01`,
+        `${year + 1}-01-01`,
+      ],
+    )
+
+    response.json({
+      year,
+      availableYears: yearRows.map((row) => Number(row.year)),
+      periods: periodRows,
+      categories: categoryRows,
+    })
+  }),
+)
+
 api.post(
   '/periods',
   asyncRoute(async (request, response) => {

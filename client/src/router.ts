@@ -3,12 +3,14 @@ import { auth, loadSession } from './auth'
 import DashboardView from './views/DashboardView.vue'
 import LoginView from './views/LoginView.vue'
 import PeriodView from './views/PeriodView.vue'
+import TrendsView from './views/TrendsView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
     { path: '/', name: 'dashboard', component: DashboardView },
+    { path: '/trends', name: 'trends', component: TrendsView },
     { path: '/periods/:id', name: 'period', component: PeriodView },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

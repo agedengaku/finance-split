@@ -26,7 +26,13 @@ async function logout() {
           </div>
         </RouterLink>
 
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 sm:gap-3">
+          <RouterLink
+            :to="{ name: 'trends' }"
+            class="rounded-lg px-2.5 py-2 text-sm font-medium text-ink-700 transition hover:bg-slate-100 hover:text-ink-950"
+          >
+            Trends
+          </RouterLink>
           <span class="hidden text-sm text-ink-700 sm:block">{{ auth.user.displayName }}</span>
           <button class="button-secondary !px-3 !py-2" type="button" @click="logout">
             Sign out
