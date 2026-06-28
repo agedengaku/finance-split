@@ -195,7 +195,11 @@ jobs:
             exit 1
           fi
 
+          # CloudLinux's generated activation script reads CL_VIRTUAL_ENV before
+          # defining it, so nounset must be disabled only while it is sourced.
+          set +u
           source "$node_activate"
+          set -u
           cd "$app_path"
 
           rm -rf server-dist client/dist
