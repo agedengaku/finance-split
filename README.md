@@ -137,3 +137,9 @@ npm start
 
 The seed command is idempotent. It creates the initial household and users only
 when they do not already exist.
+
+Production releases are automated through GitHub Actions. A release branch is
+merged into `main`, then a matching semantic version tag triggers verification,
+deployment to Hawk Host, a production health check, and a GitHub release with
+generated notes. See [Production releases](docs/DEPLOYMENT.md) for the one-time
+configuration and release procedure.

@@ -11,6 +11,7 @@
     "build:server": "tsc -p tsconfig.server.json && cp server/schema.sql server-dist/schema.sql && mkdir -p server-dist/migrations && cp server/migrations/*.sql server-dist/migrations/",
     "start": "NODE_ENV=production node server-dist/index.js",
     "db:migrate": "tsx server/scripts/migrate.ts",
+    "db:migrate:production": "NODE_ENV=production node server-dist/scripts/migrate.js",
     "db:seed": "tsx server/scripts/seed.ts",
     "test": "node --test --experimental-strip-types server/*.test.ts",
     "typecheck": "vue-tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.server.json",

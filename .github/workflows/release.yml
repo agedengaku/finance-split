@@ -1,0 +1,249 @@
+name: Release and deploy
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify tagged release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out tagged commit
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify tag and main branch
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          version="${RELEASE_TAG#v}"
+          package_version="$(node --print "require('./package.json').version")"
+
+          if [[ "$package_version" != "$version" ]]; then
+            echo "::error::Tag $RELEASE_TAG does not match package.json version $package_version."
+            exit 1
+          fi
+
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::The tagged commit must be merged into main before it can be released."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint:eslint
+
+      - name: Run Stylelint
+        run: npm run lint:styles
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Check TypeScript
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build production application
+        run: npm run build
+
+      - name: Package tested build
+        run: |
+          tar -czf fairshare-${{ github.ref_name }}.tar.gz \
+            client/dist \
+            server-dist \
+            package.json \
+            package-lock.json
+
+      - name: Save release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: fairshare-${{ github.ref_name }}
+          path: fairshare-${{ github.ref_name }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy:
+    name: Deploy to Hawk Host
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+
+    env:
+      SSH_HOST: ${{ secrets.HAWKHOST_HOST }}
+      SSH_USER: ${{ secrets.HAWKHOST_USERNAME }}
+      SSH_PRIVATE_KEY: ${{ secrets.HAWKHOST_SSH_PRIVATE_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.HAWKHOST_KNOWN_HOSTS }}
+      SSH_PORT: ${{ vars.HAWKHOST_SSH_PORT || '22' }}
+      APP_ROOT: ${{ vars.HAWKHOST_APP_ROOT }}
+      NODE_VERSION: ${{ vars.HAWKHOST_NODE_VERSION }}
+      PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+
+    steps:
+      - name: Download tested build
+        uses: actions/download-artifact@v8
+        with:
+          name: fairshare-${{ github.ref_name }}
+
+      - name: Validate deployment configuration
+        run: |
+          set -euo pipefail
+
+          required_values=(
+            SSH_HOST
+            SSH_USER
+            SSH_PRIVATE_KEY
+            SSH_KNOWN_HOSTS
+            APP_ROOT
+            NODE_VERSION
+            PRODUCTION_URL
+          )
+
+          for name in "${required_values[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing GitHub production environment configuration: $name"
+              exit 1
+            fi
+          done
+
+          if [[ ! "$APP_ROOT" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::HAWKHOST_APP_ROOT contains unsupported characters."
+            exit 1
+          fi
+
+          if [[ ! "$NODE_VERSION" =~ ^[0-9]+$ ]]; then
+            echo "::error::HAWKHOST_NODE_VERSION must be a major version number."
+            exit 1
+          fi
+
+      - name: Configure SSH
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/hawkhost_deploy"
+          chmod 600 "$HOME/.ssh/hawkhost_deploy"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Upload release artifact
+        env:
+          ARCHIVE_NAME: fairshare-${{ github.ref_name }}.tar.gz
+          REMOTE_ARCHIVE: .deploy/fairshare-${{ github.ref_name }}-${{ github.sha }}.tar.gz
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i "$HOME/.ssh/hawkhost_deploy" \
+            -p "$SSH_PORT" \
+            "$SSH_USER@$SSH_HOST" \
+            "mkdir -p \"\$HOME/$APP_ROOT/.deploy\""
+
+          scp \
+            -i "$HOME/.ssh/hawkhost_deploy" \
+            -P "$SSH_PORT" \
+            "$ARCHIVE_NAME" \
+            "$SSH_USER@$SSH_HOST:~/$APP_ROOT/$REMOTE_ARCHIVE"
+
+      - name: Install and restart application
+        env:
+          REMOTE_ARCHIVE: .deploy/fairshare-${{ github.ref_name }}-${{ github.sha }}.tar.gz
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i "$HOME/.ssh/hawkhost_deploy" \
+            -p "$SSH_PORT" \
+            "$SSH_USER@$SSH_HOST" \
+            bash -s -- "$APP_ROOT" "$NODE_VERSION" "$REMOTE_ARCHIVE" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+
+          app_root="$1"
+          node_version="$2"
+          archive_relative="$3"
+          app_path="$HOME/$app_root"
+          archive="$app_path/$archive_relative"
+          node_activate="$HOME/nodevenv/$app_root/$node_version/bin/activate"
+
+          if [[ ! -f "$node_activate" ]]; then
+            echo "Node.js environment is missing at $node_activate." >&2
+            exit 1
+          fi
+
+          source "$node_activate"
+          cd "$app_path"
+
+          rm -rf server-dist client/dist
+          tar -xzf "$archive" -C "$app_path"
+          npm ci --omit=dev
+          cloudlinux-selector run-script \
+            --json \
+            --interpreter nodejs \
+            --app-root "$app_root" \
+            --script-name db:migrate:production
+          cloudlinux-selector restart --json --interpreter nodejs --app-root "$app_root"
+          rm -f "$archive"
+          REMOTE_SCRIPT
+
+      - name: Verify production health
+        run: |
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 12 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            "${PRODUCTION_URL%/}/api/health"
+
+  release:
+    name: Publish GitHub release
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download deployed artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: fairshare-${{ github.ref_name }}
+
+      - name: Create release with generated notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            "fairshare-${RELEASE_TAG}.tar.gz#Production build" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "FairShare $RELEASE_TAG" \
+            --generate-notes \
+            --fail-on-no-commits \
+            --verify-tag
