@@ -45,7 +45,7 @@ Status notes:
 - Editing a recurring template does not rewrite already-created period expenses
 - The app is set up for local development and can be viewed on localhost
 - ESLint, Stylelint, Prettier, and EditorConfig are configured for contributors
-- GitHub Actions runs quality checks on pull requests, `main`, and release branches
+- GitHub Actions runs quality checks on pull requests, `main`, `release-*`, and `release/**` branches
 - After a release branch is merged to `main`, a matching `vX.Y.Z` tag deploys the tagged build to Hawk Host and creates a GitHub release
 - Production CI/CD setup and the release-branch procedure are documented in `docs/DEPLOYMENT.md`
 - The GitHub `production` environment, SSH secrets, and deployment variables must be configured before the first tag-triggered deployment
