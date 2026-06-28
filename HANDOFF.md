@@ -48,4 +48,5 @@ Status notes:
 - GitHub Actions runs quality checks on pull requests, `main`, `release-*`, and `release/**` branches
 - After a release branch is merged to `main`, a matching `vX.Y.Z` tag deploys the tagged build to Hawk Host and creates a GitHub release
 - Production CI/CD setup and the release-branch procedure are documented in `docs/DEPLOYMENT.md`
-- The GitHub `production` environment, SSH secrets, and deployment variables must be configured before the first tag-triggered deployment
+- The GitHub `production` environment, SSH secrets, and deployment variables are configured
+- The first automated release, `v1.0.0`, successfully passed its checks, deployed to production, passed the health check, and published a GitHub release on June 28, 2026
