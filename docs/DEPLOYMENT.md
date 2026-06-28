@@ -77,15 +77,15 @@ version in `package-lock.json`, and the Git tag must match.
 ```sh
 git switch main
 git pull --ff-only
-git switch -c release/0.2.0
+git switch -c release-0.2.0
 npm version 0.2.0 --no-git-tag-version
 npm run check
 git add package.json package-lock.json
 git commit -m "Prepare release 0.2.0"
-git push -u origin release/0.2.0
+git push -u origin release-0.2.0
 ```
 
-Open a pull request from `release/0.2.0` into `main`. GitHub runs ESLint,
+Open a pull request from `release-0.2.0` into `main`. GitHub runs ESLint,
 Stylelint, Prettier, TypeScript checks, tests, and the production build. Merge
 only after CI passes.
 
