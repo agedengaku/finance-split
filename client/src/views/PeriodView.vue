@@ -121,6 +121,7 @@ const incomeDraft = reactive<Record<number, string>>({})
 const editingExpenseId = ref<number | null>(null)
 const editingOwedAmountId = ref<number | null>(null)
 const editingRecurringExpenseId = ref<number | null>(null)
+const showExpenseList = ref(false)
 const showBulkImport = ref(false)
 const showRecurringForm = ref(false)
 
@@ -611,19 +612,31 @@ watch(() => route.params.id, load)
     </form>
 
     <div class="mb-8">
-      <div class="mb-3 flex items-end justify-between">
+      <div class="mb-3 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
         <div>
           <p class="eyebrow">Expenses</p>
           <h2 class="mt-1 text-xl font-semibold">Shared expenses</h2>
         </div>
-        <p class="text-sm text-ink-500">{{ expenses.length }} total</p>
+        <div class="flex items-center gap-3">
+          <p class="text-sm text-ink-500">{{ expenses.length }} total</p>
+          <button
+            v-if="expenses.length"
+            class="button-secondary"
+            type="button"
+            :aria-expanded="showExpenseList"
+            aria-controls="expense-list"
+            @click="showExpenseList = !showExpenseList"
+          >
+            {{ showExpenseList ? 'Hide expenses' : 'Show expenses' }}
+          </button>
+        </div>
       </div>
 
       <div v-if="!expenses.length" class="card border-dashed p-9 text-center text-sm text-ink-500">
         No expenses have been added to this period.
       </div>
 
-      <div v-else class="card overflow-hidden">
+      <div v-else-if="showExpenseList" id="expense-list" class="card overflow-hidden">
         <div
           class="hidden grid-cols-[110px_1fr_130px_150px_100px] gap-4 border-b bg-slate-50 px-5 py-3 text-xs font-semibold text-ink-500 md:grid"
         >

@@ -51,10 +51,17 @@ test('keeps expense and import controls before the settlement summary', () => {
 
 test('does not render duplicate moved period sections', () => {
   assert.equal(countOccurrences('id="expense-form"'), 1)
+  assert.equal(countOccurrences('id="expense-list"'), 1)
   assert.equal(countOccurrences('<p class="eyebrow">Expenses</p>'), 1)
   assert.equal(countOccurrences('<p class="eyebrow">Owed amounts</p>'), 1)
   assert.equal(countOccurrences('<p class="eyebrow">Import history</p>'), 1)
   assert.equal(countOccurrences("{{ isClosed ? 'Reopen period' : 'Close period' }}"), 1)
+})
+
+test('keeps the shared expense list collapsed by default', () => {
+  indexOfRequired('const showExpenseList = ref(false)')
+  indexOfRequired("{{ showExpenseList ? 'Hide expenses' : 'Show expenses' }}")
+  indexOfRequired('v-else-if="showExpenseList" id="expense-list"')
 })
 
 test('leaves period close or reopen as the last action in the template', () => {
