@@ -43,6 +43,17 @@ interface RecurringExpense {
   notes: string | null
 }
 
+interface OwedAmount {
+  id: number
+  amount: string
+  description: string
+  fromUserId: number
+  fromName: string
+  toUserId: number
+  toName: string
+  notes: string | null
+}
+
 interface ImportBatch {
   id: number
   sourceName: string
@@ -67,6 +78,7 @@ interface Summary {
   reason: string | null
   totalIncome: string
   totalExpenses: string
+  totalOwedAdjustments: string
   members: SummaryMember[]
   settlement: {
     fromUserId: number
@@ -81,6 +93,7 @@ interface PeriodResponse {
   period: Period
   members: Member[]
   expenses: Expense[]
+  owedAmounts: OwedAmount[]
   recurringExpenses: RecurringExpense[]
   imports: ImportBatch[]
   summary: Summary
@@ -92,6 +105,7 @@ const error = ref('')
 const period = ref<Period | null>(null)
 const members = ref<Member[]>([])
 const expenses = ref<Expense[]>([])
+const owedAmounts = ref<OwedAmount[]>([])
 const recurringExpenses = ref<RecurringExpense[]>([])
 const imports = ref<ImportBatch[]>([])
 const summary = ref<Summary>({
@@ -99,11 +113,13 @@ const summary = ref<Summary>({
   reason: 'Enter household income to calculate the split.',
   totalIncome: '0',
   totalExpenses: '0',
+  totalOwedAdjustments: '0',
   members: [],
   settlement: null,
 })
 const incomeDraft = reactive<Record<number, string>>({})
 const editingExpenseId = ref<number | null>(null)
+const editingOwedAmountId = ref<number | null>(null)
 const editingRecurringExpenseId = ref<number | null>(null)
 const showBulkImport = ref(false)
 const showRecurringForm = ref(false)
@@ -114,6 +130,14 @@ const expenseForm = reactive({
   category: '',
   amount: '',
   paidBy: '',
+  notes: '',
+})
+
+const owedAmountForm = reactive({
+  description: '',
+  amount: '',
+  fromUserId: '',
+  toUserId: '',
   notes: '',
 })
 
@@ -142,6 +166,7 @@ async function load() {
     period.value = data.period
     members.value = data.members
     expenses.value = data.expenses
+    owedAmounts.value = data.owedAmounts
     recurringExpenses.value = data.recurringExpenses
     imports.value = data.imports
     summary.value = data.summary
@@ -149,6 +174,12 @@ async function load() {
     const firstMember = data.members[0]
     if (!expenseForm.paidBy && firstMember) {
       expenseForm.paidBy = String(firstMember.id)
+    }
+    if (!owedAmountForm.fromUserId && firstMember) {
+      owedAmountForm.fromUserId = String(firstMember.id)
+    }
+    if (!owedAmountForm.toUserId && data.members[1]) {
+      owedAmountForm.toUserId = String(data.members[1].id)
     }
     if (!recurringExpenseForm.paidBy && firstMember) {
       recurringExpenseForm.paidBy = String(firstMember.id)
@@ -198,6 +229,15 @@ function clearExpenseForm() {
   expenseForm.notes = ''
 }
 
+function clearOwedAmountForm() {
+  editingOwedAmountId.value = null
+  owedAmountForm.description = ''
+  owedAmountForm.amount = ''
+  owedAmountForm.fromUserId = String(members.value[0]?.id || '')
+  owedAmountForm.toUserId = String(members.value[1]?.id || members.value[0]?.id || '')
+  owedAmountForm.notes = ''
+}
+
 function clearRecurringExpenseForm() {
   editingRecurringExpenseId.value = null
   recurringExpenseForm.description = ''
@@ -231,6 +271,16 @@ function editExpense(expense: Expense) {
   document.querySelector('#expense-form')?.scrollIntoView({ behavior: 'smooth' })
 }
 
+function editOwedAmount(owedAmount: OwedAmount) {
+  editingOwedAmountId.value = owedAmount.id
+  owedAmountForm.description = owedAmount.description
+  owedAmountForm.amount = String(owedAmount.amount)
+  owedAmountForm.fromUserId = String(owedAmount.fromUserId)
+  owedAmountForm.toUserId = String(owedAmount.toUserId)
+  owedAmountForm.notes = owedAmount.notes || ''
+  document.querySelector('#owed-amount-form')?.scrollIntoView({ behavior: 'smooth' })
+}
+
 function editRecurringExpense(expense: RecurringExpense) {
   editingRecurringExpenseId.value = expense.id
   showRecurringForm.value = true
@@ -260,6 +310,28 @@ async function saveExpense() {
   } catch (requestError: unknown) {
     error.value =
       requestError instanceof ApiError ? requestError.message : 'Unable to save the expense.'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function saveOwedAmount() {
+  if (!period.value) return
+  error.value = ''
+  saving.value = true
+  try {
+    const path = editingOwedAmountId.value
+      ? `/owed-amounts/${editingOwedAmountId.value}`
+      : `/periods/${period.value.id}/owed-amounts`
+    await api(path, {
+      method: editingOwedAmountId.value ? 'PUT' : 'POST',
+      body: owedAmountForm,
+    })
+    clearOwedAmountForm()
+    await load()
+  } catch (requestError: unknown) {
+    error.value =
+      requestError instanceof ApiError ? requestError.message : 'Unable to save the owed amount.'
   } finally {
     saving.value = false
   }
@@ -319,6 +391,18 @@ async function removeExpense(expense: Expense) {
   }
 }
 
+async function removeOwedAmount(owedAmount: OwedAmount) {
+  if (!window.confirm(`Delete “${owedAmount.description}”?`)) return
+  error.value = ''
+  try {
+    await api(`/owed-amounts/${owedAmount.id}`, { method: 'DELETE', body: {} })
+    await load()
+  } catch (requestError: unknown) {
+    error.value =
+      requestError instanceof ApiError ? requestError.message : 'Unable to delete the owed amount.'
+  }
+}
+
 async function removeRecurringExpense(expense: RecurringExpense) {
   if (
     !window.confirm(
@@ -366,7 +450,7 @@ async function toggleStatus() {
   const nextStatus = isClosed.value ? 'open' : 'closed'
   if (
     nextStatus === 'closed' &&
-    !window.confirm('Close this period? Income and expenses will become read-only.')
+    !window.confirm('Close this period? Income, expenses, and owed amounts will become read-only.')
   ) {
     return
   }
@@ -587,6 +671,168 @@ watch(() => route.params.id, load)
       </div>
     </div>
 
+    <div class="mb-8">
+      <div class="mb-3">
+        <p class="eyebrow">Owed amounts</p>
+        <h2 class="mt-1 text-xl font-semibold">Money owed directly</h2>
+      </div>
+
+      <form
+        v-if="!isClosed"
+        id="owed-amount-form"
+        class="card mb-4 p-5 sm:p-6"
+        @submit.prevent="saveOwedAmount"
+      >
+        <div class="mb-5 flex items-center justify-between">
+          <div>
+            <p class="eyebrow">
+              {{ editingOwedAmountId ? 'Editing owed amount' : 'New owed amount' }}
+            </p>
+            <h3 class="mt-1 text-lg font-semibold">
+              {{ editingOwedAmountId ? 'Update owed amount' : 'Add money owed' }}
+            </h3>
+          </div>
+          <button
+            v-if="editingOwedAmountId"
+            class="text-sm text-ink-500 hover:text-ink-950"
+            type="button"
+            @click="clearOwedAmountForm"
+          >
+            Cancel
+          </button>
+        </div>
+
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div class="sm:col-span-2">
+            <label class="label" for="owedDescription">Description</label>
+            <input
+              id="owedDescription"
+              v-model="owedAmountForm.description"
+              class="input"
+              placeholder="Flight reimbursement, gift split…"
+              maxlength="160"
+              required
+            />
+          </div>
+          <div>
+            <label class="label" for="owedAmount">Amount</label>
+            <div class="relative">
+              <span class="pointer-events-none absolute top-2.5 left-3.5 text-sm text-ink-500"
+                >¥</span
+              >
+              <input
+                id="owedAmount"
+                v-model="owedAmountForm.amount"
+                class="input !pl-8"
+                type="number"
+                min="1"
+                step="1"
+                inputmode="numeric"
+                placeholder="0"
+                required
+              />
+            </div>
+          </div>
+          <div>
+            <label class="label" for="owedFrom">Owed by</label>
+            <select id="owedFrom" v-model="owedAmountForm.fromUserId" class="input" required>
+              <option v-for="member in members" :key="member.id" :value="String(member.id)">
+                {{ member.name }}
+              </option>
+            </select>
+          </div>
+          <div>
+            <label class="label" for="owedTo">Owed to</label>
+            <select id="owedTo" v-model="owedAmountForm.toUserId" class="input" required>
+              <option v-for="member in members" :key="member.id" :value="String(member.id)">
+                {{ member.name }}
+              </option>
+            </select>
+          </div>
+          <div class="sm:col-span-2 lg:col-span-3">
+            <label class="label" for="owedNotes">Notes</label>
+            <input
+              id="owedNotes"
+              v-model="owedAmountForm.notes"
+              class="input"
+              placeholder="Optional details"
+              maxlength="2000"
+            />
+          </div>
+        </div>
+
+        <div class="mt-5 flex justify-end">
+          <button class="button-primary" type="submit" :disabled="saving">
+            {{
+              saving ? 'Saving…' : editingOwedAmountId ? 'Update owed amount' : 'Add owed amount'
+            }}
+          </button>
+        </div>
+      </form>
+
+      <div
+        v-if="!owedAmounts.length"
+        class="card border-dashed p-9 text-center text-sm text-ink-500"
+      >
+        No direct owed amounts have been added to this period.
+      </div>
+
+      <div v-else class="card overflow-hidden">
+        <div
+          class="hidden gap-4 border-b bg-slate-50 px-5 py-3 text-xs font-semibold text-ink-500 md:grid"
+          :class="
+            isClosed
+              ? 'md:grid-cols-[1fr_150px_150px_120px]'
+              : 'md:grid-cols-[1fr_150px_150px_120px_100px]'
+          "
+        >
+          <div>Description</div>
+          <div>Owed by</div>
+          <div>Owed to</div>
+          <div class="text-right">Amount</div>
+          <div v-if="!isClosed" />
+        </div>
+        <div class="divide-y">
+          <div
+            v-for="owedAmount in owedAmounts"
+            :key="owedAmount.id"
+            class="grid gap-3 px-5 py-4 md:items-center md:gap-4"
+            :class="
+              isClosed
+                ? 'md:grid-cols-[1fr_150px_150px_120px]'
+                : 'md:grid-cols-[1fr_150px_150px_120px_100px]'
+            "
+          >
+            <div>
+              <p class="font-medium">{{ owedAmount.description }}</p>
+              <p v-if="owedAmount.notes" class="mt-0.5 text-xs text-ink-500">
+                {{ owedAmount.notes }}
+              </p>
+            </div>
+            <p class="text-sm text-ink-700">{{ owedAmount.fromName }}</p>
+            <p class="text-sm text-ink-700">{{ owedAmount.toName }}</p>
+            <p class="text-lg font-semibold md:text-right">{{ formatYen(owedAmount.amount) }}</p>
+            <div v-if="!isClosed" class="flex gap-3 text-sm md:justify-end">
+              <button
+                class="font-medium text-mint-700 hover:text-mint-600"
+                type="button"
+                @click="editOwedAmount(owedAmount)"
+              >
+                Edit
+              </button>
+              <button
+                class="font-medium text-red-600 hover:text-red-500"
+                type="button"
+                @click="removeOwedAmount(owedAmount)"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div v-if="!isClosed" class="mb-4 flex justify-end">
       <button class="button-secondary" type="button" @click="showBulkImport = !showBulkImport">
         {{ showBulkImport ? 'Hide CSV import' : 'Import CSV' }}
@@ -655,7 +901,7 @@ watch(() => route.params.id, load)
           <p class="mt-4 text-2xl font-semibold">Income needed</p>
           <p class="mt-3 text-sm text-slate-300">{{ summary.reason }}</p>
         </template>
-        <div class="mt-8 grid grid-cols-2 gap-4 border-t border-white/15 pt-5">
+        <div class="mt-8 grid gap-4 border-t border-white/15 pt-5 sm:grid-cols-3">
           <div>
             <p class="text-xs text-slate-400">Total income</p>
             <p class="mt-1 font-semibold">{{ formatYen(summary.totalIncome) }}</p>
@@ -663,6 +909,10 @@ watch(() => route.params.id, load)
           <div>
             <p class="text-xs text-slate-400">Total expenses</p>
             <p class="mt-1 font-semibold">{{ formatYen(summary.totalExpenses) }}</p>
+          </div>
+          <div>
+            <p class="text-xs text-slate-400">Owed amounts</p>
+            <p class="mt-1 font-semibold">{{ formatYen(summary.totalOwedAdjustments) }}</p>
           </div>
         </div>
       </div>

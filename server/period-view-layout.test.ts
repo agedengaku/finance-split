@@ -19,6 +19,7 @@ test('orders period page sections around the mobile expense workflow', () => {
   const periodDate = indexOfRequired('formatDate(period.startDate)')
   const newExpense = indexOfRequired("{{ editingExpenseId ? 'Editing expense' : 'New expense' }}")
   const expenses = indexOfRequired('<p class="eyebrow">Expenses</p>')
+  const owedAmounts = indexOfRequired('<p class="eyebrow">Owed amounts</p>')
   const settlement = indexOfRequired('Settlement</p>')
   const split = indexOfRequired('<p class="eyebrow">How it is split</p>')
   const income = indexOfRequired('<p class="eyebrow">Income</p>')
@@ -28,7 +29,8 @@ test('orders period page sections around the mobile expense workflow', () => {
 
   assert.ok(periodDate < newExpense)
   assert.ok(newExpense < expenses)
-  assert.ok(expenses < settlement)
+  assert.ok(expenses < owedAmounts)
+  assert.ok(owedAmounts < settlement)
   assert.ok(settlement < split)
   assert.ok(split < income)
   assert.ok(income < recurring)
@@ -50,6 +52,7 @@ test('keeps expense and import controls before the settlement summary', () => {
 test('does not render duplicate moved period sections', () => {
   assert.equal(countOccurrences('id="expense-form"'), 1)
   assert.equal(countOccurrences('<p class="eyebrow">Expenses</p>'), 1)
+  assert.equal(countOccurrences('<p class="eyebrow">Owed amounts</p>'), 1)
   assert.equal(countOccurrences('<p class="eyebrow">Import history</p>'), 1)
   assert.equal(countOccurrences("{{ isClosed ? 'Reopen period' : 'Close period' }}"), 1)
 })

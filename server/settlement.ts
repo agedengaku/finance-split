@@ -11,6 +11,12 @@ export interface SettlementExpenseInput {
   paidBy: Identifier
 }
 
+export interface SettlementOwedAmountInput {
+  amount: string | number
+  fromUserId: Identifier
+  toUserId: Identifier
+}
+
 export interface SettlementMemberResult {
   id: Identifier
   name: string
@@ -26,6 +32,7 @@ export interface SettlementResult {
   reason: string | null
   totalIncome: string
   totalExpenses: string
+  totalOwedAdjustments: string
   members: SettlementMemberResult[]
   settlement: {
     fromUserId: Identifier
@@ -47,11 +54,13 @@ export function yenToBigInt(value: string | number | bigint): bigint {
 export function calculateSettlement(
   members: SettlementMemberInput[],
   expenses: SettlementExpenseInput[],
+  owedAmounts: SettlementOwedAmountInput[] = [],
 ): SettlementResult {
   const normalized = members.map((member) => ({
     ...member,
     incomeYen: yenToBigInt(member.income),
     paidYen: 0n,
+    owedAdjustmentYen: 0n,
   }))
   const byId = new Map(normalized.map((member) => [String(member.id), member]))
 
@@ -63,6 +72,16 @@ export function calculateSettlement(
     if (payer) payer.paidYen += amount
   }
 
+  let totalOwedAdjustments = 0n
+  for (const owedAmount of owedAmounts) {
+    const amount = yenToBigInt(owedAmount.amount)
+    totalOwedAdjustments += amount
+    const debtor = byId.get(String(owedAmount.fromUserId))
+    const creditor = byId.get(String(owedAmount.toUserId))
+    if (debtor) debtor.owedAdjustmentYen -= amount
+    if (creditor) creditor.owedAdjustmentYen += amount
+  }
+
   const totalIncome = normalized.reduce((total, member) => total + member.incomeYen, 0n)
 
   if (totalIncome === 0n) {
@@ -71,6 +90,7 @@ export function calculateSettlement(
       reason: 'Enter household income to calculate the split.',
       totalIncome: '0',
       totalExpenses: String(totalExpenses),
+      totalOwedAdjustments: String(totalOwedAdjustments),
       members: normalized.map((member) => ({
         id: member.id,
         name: member.name,
@@ -78,7 +98,7 @@ export function calculateSettlement(
         percentage: 0,
         fairShare: '0',
         paid: String(member.paidYen),
-        balance: String(member.paidYen),
+        balance: String(member.paidYen + member.owedAdjustmentYen),
       })),
       settlement: null,
     }
@@ -112,7 +132,7 @@ export function calculateSettlement(
       percentage: Number(((member.incomeYen * 10000n) / totalIncome).toString()) / 100,
       fairShare: String(fairShareYen),
       paid: String(member.paidYen),
-      balanceYen: member.paidYen - fairShareYen,
+      balanceYen: member.paidYen - fairShareYen + member.owedAdjustmentYen,
     }))
     .sort((a, b) => String(a.id).localeCompare(String(b.id)))
 
@@ -132,6 +152,7 @@ export function calculateSettlement(
     reason: null,
     totalIncome: String(totalIncome),
     totalExpenses: String(totalExpenses),
+    totalOwedAdjustments: String(totalOwedAdjustments),
     members: results.map(({ balanceYen, ...member }) => ({
       ...member,
       balance: String(balanceYen),

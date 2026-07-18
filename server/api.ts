@@ -158,6 +158,17 @@ interface ExpenseRow extends RowDataPacket {
   notes: string | null
 }
 
+interface OwedAmountRow extends RowDataPacket {
+  id: number
+  amount: string
+  description: string
+  fromUserId: number
+  fromName: string
+  toUserId: number
+  toName: string
+  notes: string | null
+}
+
 interface ExpenseImportRow extends RowDataPacket {
   id: number
   sourceName: string
@@ -188,6 +199,16 @@ interface ImportLookupRow extends RowDataPacket {
 }
 
 interface ExpenseStatusRow extends RowDataPacket {
+  id: number
+  status: 'open' | 'closed'
+}
+
+interface OwedAmountLookupRow extends RowDataPacket {
+  id: number
+  periodId: number
+}
+
+interface OwedAmountStatusRow extends RowDataPacket {
   id: number
   status: 'open' | 'closed'
 }
@@ -227,7 +248,7 @@ async function assertMember(
 
 function assertEditable(period: Pick<PeriodRecord, 'status'>): void {
   if (period.status === 'closed') {
-    throw httpError(409, 'Reopen this period before changing its income or expenses.')
+    throw httpError(409, 'Reopen this period before changing income, expenses, or owed amounts.')
   }
 }
 
@@ -517,6 +538,17 @@ api.get(
         ORDER BY e.expense_date DESC, e.id DESC`,
       [periodId],
     )
+    const [owedAmountRows] = await pool.execute<OwedAmountRow[]>(
+      `SELECT oa.id, oa.amount, oa.description, oa.from_user_id AS fromUserId,
+              from_user.display_name AS fromName, oa.to_user_id AS toUserId,
+              to_user.display_name AS toName, oa.notes
+         FROM owed_amounts oa
+         JOIN users from_user ON from_user.id = oa.from_user_id
+         JOIN users to_user ON to_user.id = oa.to_user_id
+        WHERE oa.period_id = ?
+        ORDER BY oa.created_at DESC, oa.id DESC`,
+      [periodId],
+    )
     const [importRows] = await pool.execute<ExpenseImportRow[]>(
       `SELECT ei.id, ei.source_name AS sourceName, ei.row_count AS rowCount,
               ei.total_amount AS totalAmount, u.display_name AS importedBy,
@@ -534,11 +566,17 @@ api.get(
         amount: expense.amount,
         paidBy: expense.paidBy,
       })),
+      owedAmountRows.map((owedAmount) => ({
+        amount: owedAmount.amount,
+        fromUserId: owedAmount.fromUserId,
+        toUserId: owedAmount.toUserId,
+      })),
     )
     response.json({
       period,
       members: memberRows,
       expenses: expenseRows,
+      owedAmounts: owedAmountRows,
       recurringExpenses,
       imports: importRows,
       summary,
@@ -821,6 +859,33 @@ api.post(
   }),
 )
 
+api.post(
+  '/periods/:periodId/owed-amounts',
+  asyncRoute(async (request, response) => {
+    const periodId = id(request.params.periodId, 'Period ID')
+    const period = await getPeriod(periodId, request.membership.householdId)
+    assertEditable(period)
+    const fromUserId = id(request.body.fromUserId, 'Person who owes')
+    const toUserId = id(request.body.toUserId, 'Person owed')
+    if (fromUserId === toUserId) {
+      throw httpError(400, 'Choose two different people for an owed amount.')
+    }
+    await assertMember(fromUserId, request.membership.householdId)
+    await assertMember(toUserId, request.membership.householdId)
+    const amount = money(request.body.amount)
+    const description = requiredText(request.body.description, 'Description', 160)
+    const notes = optionalText(request.body.notes, 'Notes', 2000)
+
+    const [result] = await pool.execute<ResultSetHeader>(
+      `INSERT INTO owed_amounts
+         (period_id, from_user_id, to_user_id, amount, description, notes, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [periodId, fromUserId, toUserId, amount, description, notes, request.session.userId!],
+    )
+    response.status(201).json({ owedAmount: { id: result.insertId } })
+  }),
+)
+
 api.delete(
   '/imports/:importId',
   asyncRoute(async (request, response) => {
@@ -895,6 +960,65 @@ api.delete(
     if (!rows[0]) throw httpError(404, 'Expense not found.')
     assertEditable(rows[0])
     await pool.execute('DELETE FROM expenses WHERE id = ?', [expenseId])
+    response.status(204).end()
+  }),
+)
+
+api.put(
+  '/owed-amounts/:owedAmountId',
+  asyncRoute(async (request, response) => {
+    const owedAmountId = id(request.params.owedAmountId, 'Owed amount ID')
+    await withTransaction(async (connection) => {
+      const [rows] = await connection.execute<OwedAmountLookupRow[]>(
+        `SELECT oa.id, oa.period_id AS periodId
+           FROM owed_amounts oa
+           JOIN periods p ON p.id = oa.period_id
+          WHERE oa.id = ? AND p.household_id = ?
+          FOR UPDATE`,
+        [owedAmountId, request.membership.householdId],
+      )
+      if (!rows[0]) throw httpError(404, 'Owed amount not found.')
+      const period = await getPeriod(rows[0].periodId, request.membership.householdId, connection)
+      assertEditable(period)
+      const fromUserId = id(request.body.fromUserId, 'Person who owes')
+      const toUserId = id(request.body.toUserId, 'Person owed')
+      if (fromUserId === toUserId) {
+        throw httpError(400, 'Choose two different people for an owed amount.')
+      }
+      await assertMember(fromUserId, request.membership.householdId, connection)
+      await assertMember(toUserId, request.membership.householdId, connection)
+      await connection.execute(
+        `UPDATE owed_amounts
+            SET from_user_id = ?, to_user_id = ?, amount = ?, description = ?, notes = ?
+          WHERE id = ?`,
+        [
+          fromUserId,
+          toUserId,
+          money(request.body.amount),
+          requiredText(request.body.description, 'Description', 160),
+          optionalText(request.body.notes, 'Notes', 2000),
+          owedAmountId,
+        ],
+      )
+    })
+    response.json({ owedAmount: { id: owedAmountId } })
+  }),
+)
+
+api.delete(
+  '/owed-amounts/:owedAmountId',
+  asyncRoute(async (request, response) => {
+    const owedAmountId = id(request.params.owedAmountId, 'Owed amount ID')
+    const [rows] = await pool.execute<OwedAmountStatusRow[]>(
+      `SELECT oa.id, p.status
+         FROM owed_amounts oa
+         JOIN periods p ON p.id = oa.period_id
+        WHERE oa.id = ? AND p.household_id = ?`,
+      [owedAmountId, request.membership.householdId],
+    )
+    if (!rows[0]) throw httpError(404, 'Owed amount not found.')
+    assertEditable(rows[0])
+    await pool.execute('DELETE FROM owed_amounts WHERE id = ?', [owedAmountId])
     response.status(204).end()
   }),
 )

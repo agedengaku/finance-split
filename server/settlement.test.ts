@@ -40,6 +40,29 @@ test('allocates every yen when percentages produce fractions', () => {
   )
 })
 
+test('applies direct owed amounts to the final settlement', () => {
+  const result = calculateSettlement(
+    [
+      { id: 1, name: 'Alex', income: '600000' },
+      { id: 2, name: 'Sam', income: '400000' },
+    ],
+    [
+      { amount: '450000', paidBy: 1 },
+      { amount: '50000', paidBy: 2 },
+    ],
+    [{ amount: '20000', fromUserId: 1, toUserId: 2 }],
+  )
+
+  assert.equal(result.totalOwedAdjustments, '20000')
+  assert.deepEqual(result.settlement, {
+    fromUserId: 2,
+    fromName: 'Sam',
+    toUserId: 1,
+    toName: 'Alex',
+    amount: '130000',
+  })
+})
+
 test('does not calculate percentages without income', () => {
   const result = calculateSettlement(
     [
@@ -51,4 +74,5 @@ test('does not calculate percentages without income', () => {
 
   assert.equal(result.ready, false)
   assert.equal(result.totalExpenses, '10')
+  assert.equal(result.totalOwedAdjustments, '0')
 })
