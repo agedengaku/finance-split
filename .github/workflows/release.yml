@@ -214,14 +214,34 @@ jobs:
 
       - name: Verify production health
         run: |
-          curl \
-            --fail \
-            --silent \
-            --show-error \
-            --retry 36 \
-            --retry-delay 5 \
-            --retry-all-errors \
-            "${PRODUCTION_URL%/}/api/health"
+          set -euo pipefail
+
+          health_url="${PRODUCTION_URL%/}/api/health"
+
+          for attempt in {1..72}; do
+            response="$(
+              curl \
+                --silent \
+                --show-error \
+                --location \
+                --header 'Accept: application/json' \
+                --write-out '\n%{http_code}' \
+                "$health_url" || true
+            )"
+            status="$(printf '%s' "$response" | tail -n 1)"
+            body="$(printf '%s' "$response" | sed '$d')"
+
+            if [[ "$status" == "200" && "$body" == *'"status":"ok"'* ]]; then
+              echo "Production health check passed."
+              exit 0
+            fi
+
+            echo "Health check attempt $attempt failed with HTTP $status: $body"
+            sleep 5
+          done
+
+          echo "::error::Production health check did not pass after 72 attempts."
+          exit 1
 
   release:
     name: Publish GitHub release
