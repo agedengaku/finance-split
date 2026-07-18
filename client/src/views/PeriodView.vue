@@ -401,7 +401,7 @@ watch(() => route.params.id, load)
       <span>←</span> All periods
     </RouterLink>
 
-    <div class="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+    <div class="mb-8">
       <div>
         <div class="flex items-center gap-3">
           <p class="eyebrow">{{ isClosed ? 'Closed period' : 'Open period' }}</p>
@@ -414,9 +414,6 @@ watch(() => route.params.id, load)
           {{ formatDate(period.startDate) }} – {{ formatDate(period.endDate) }}
         </p>
       </div>
-      <button class="button-secondary" type="button" :disabled="saving" @click="toggleStatus">
-        {{ isClosed ? 'Reopen period' : 'Close period' }}
-      </button>
     </div>
 
     <div
@@ -426,6 +423,215 @@ watch(() => route.params.id, load)
     >
       {{ error }}
     </div>
+
+    <form
+      v-if="!isClosed"
+      id="expense-form"
+      class="card mb-8 p-5 sm:p-6"
+      @submit.prevent="saveExpense"
+    >
+      <div class="mb-5 flex items-center justify-between">
+        <div>
+          <p class="eyebrow">{{ editingExpenseId ? 'Editing expense' : 'New expense' }}</p>
+          <h2 class="mt-1 text-xl font-semibold">
+            {{ editingExpenseId ? 'Update expense' : 'Add a shared expense' }}
+          </h2>
+        </div>
+        <button
+          v-if="editingExpenseId"
+          class="text-sm text-ink-500 hover:text-ink-950"
+          type="button"
+          @click="clearExpenseForm"
+        >
+          Cancel
+        </button>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div>
+          <label class="label" for="expenseDate">Date</label>
+          <input
+            id="expenseDate"
+            v-model="expenseForm.expenseDate"
+            class="input"
+            type="date"
+            :min="period.startDate"
+            :max="period.endDate"
+            required
+          />
+        </div>
+        <div class="sm:col-span-1 lg:col-span-2">
+          <label class="label" for="description">Description</label>
+          <input
+            id="description"
+            v-model="expenseForm.description"
+            class="input"
+            placeholder="Rent, groceries, utilities…"
+            maxlength="160"
+            required
+          />
+        </div>
+        <div>
+          <label class="label" for="amount">Amount</label>
+          <div class="relative">
+            <span class="pointer-events-none absolute top-2.5 left-3.5 text-sm text-ink-500"
+              >¥</span
+            >
+            <input
+              id="amount"
+              v-model="expenseForm.amount"
+              class="input !pl-8"
+              type="number"
+              min="1"
+              step="1"
+              inputmode="numeric"
+              placeholder="0"
+              required
+            />
+          </div>
+        </div>
+        <div>
+          <label class="label" for="paidBy">Paid by</label>
+          <select id="paidBy" v-model="expenseForm.paidBy" class="input" required>
+            <option v-for="member in members" :key="member.id" :value="String(member.id)">
+              {{ member.name }}
+            </option>
+          </select>
+        </div>
+        <div>
+          <label class="label" for="category">Category</label>
+          <input
+            id="category"
+            v-model="expenseForm.category"
+            class="input"
+            placeholder="Optional"
+            maxlength="80"
+          />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="label" for="notes">Notes</label>
+          <input
+            id="notes"
+            v-model="expenseForm.notes"
+            class="input"
+            placeholder="Optional details"
+            maxlength="2000"
+          />
+        </div>
+      </div>
+      <div class="mt-5 flex justify-end">
+        <button class="button-primary" type="submit" :disabled="saving">
+          {{ saving ? 'Saving…' : editingExpenseId ? 'Update expense' : 'Add expense' }}
+        </button>
+      </div>
+    </form>
+
+    <div class="mb-8">
+      <div class="mb-3 flex items-end justify-between">
+        <div>
+          <p class="eyebrow">Expenses</p>
+          <h2 class="mt-1 text-xl font-semibold">Shared expenses</h2>
+        </div>
+        <p class="text-sm text-ink-500">{{ expenses.length }} total</p>
+      </div>
+
+      <div v-if="!expenses.length" class="card border-dashed p-9 text-center text-sm text-ink-500">
+        No expenses have been added to this period.
+      </div>
+
+      <div v-else class="card overflow-hidden">
+        <div
+          class="hidden grid-cols-[110px_1fr_130px_150px_100px] gap-4 border-b bg-slate-50 px-5 py-3 text-xs font-semibold text-ink-500 md:grid"
+        >
+          <div>Date</div>
+          <div>Expense</div>
+          <div>Paid by</div>
+          <div class="text-right">Amount</div>
+          <div />
+        </div>
+        <div class="divide-y">
+          <div
+            v-for="expense in expenses"
+            :key="expense.id"
+            class="grid gap-3 px-5 py-4 md:grid-cols-[110px_1fr_130px_150px_100px] md:items-center md:gap-4"
+          >
+            <p class="text-sm text-ink-500">
+              {{ formatDate(expense.expenseDate) || 'No date' }}
+            </p>
+            <div>
+              <p class="font-medium">{{ expense.description }}</p>
+              <p v-if="expense.category" class="mt-0.5 text-xs text-ink-500">
+                {{ expense.category }}
+              </p>
+            </div>
+            <p class="text-sm text-ink-700">{{ expense.payerName }}</p>
+            <p class="text-lg font-semibold md:text-right">{{ formatYen(expense.amount) }}</p>
+            <div v-if="!isClosed" class="flex gap-3 text-sm md:justify-end">
+              <button
+                class="font-medium text-mint-700 hover:text-mint-600"
+                type="button"
+                @click="editExpense(expense)"
+              >
+                Edit
+              </button>
+              <button
+                class="font-medium text-red-600 hover:text-red-500"
+                type="button"
+                @click="removeExpense(expense)"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="!isClosed" class="mb-4 flex justify-end">
+      <button class="button-secondary" type="button" @click="showBulkImport = !showBulkImport">
+        {{ showBulkImport ? 'Hide CSV import' : 'Import CSV' }}
+      </button>
+    </div>
+
+    <BulkExpenseImport
+      v-if="showBulkImport && !isClosed"
+      :period-id="period.id"
+      :start-date="period.startDate"
+      :end-date="period.endDate"
+      :members="members"
+      :existing-expenses="expenses"
+      @imported="importComplete"
+    />
+
+    <section v-if="imports.length" class="card mb-8 overflow-hidden">
+      <div class="border-b bg-slate-50/70 px-5 py-4">
+        <p class="eyebrow">Import history</p>
+        <h2 class="mt-1 text-lg font-semibold">CSV batches</h2>
+      </div>
+      <div class="divide-y">
+        <div
+          v-for="batch in imports"
+          :key="batch.id"
+          class="flex flex-col justify-between gap-3 px-5 py-4 sm:flex-row sm:items-center"
+        >
+          <div>
+            <p class="font-medium">{{ batch.sourceName }}</p>
+            <p class="mt-1 text-xs text-ink-500">
+              {{ batch.rowCount }} expenses · {{ formatYen(batch.totalAmount) }} ·
+              {{ batch.importedBy }} · {{ formatDateTime(batch.importedAt) }}
+            </p>
+          </div>
+          <button
+            v-if="!isClosed"
+            class="text-left text-sm font-medium text-red-600 hover:text-red-500"
+            type="button"
+            @click="undoImport(batch)"
+          >
+            Undo import
+          </button>
+        </div>
+      </div>
+    </section>
 
     <div class="mb-8 grid gap-4 lg:grid-cols-[1.35fr_1fr]">
       <div
@@ -722,213 +928,10 @@ watch(() => route.params.id, load)
       </div>
     </div>
 
-    <div v-if="!isClosed" class="mb-4 flex justify-end">
-      <button class="button-secondary" type="button" @click="showBulkImport = !showBulkImport">
-        {{ showBulkImport ? 'Hide CSV import' : 'Import CSV' }}
+    <div class="mt-10 flex justify-end border-t border-slate-200 pt-6">
+      <button class="button-secondary" type="button" :disabled="saving" @click="toggleStatus">
+        {{ isClosed ? 'Reopen period' : 'Close period' }}
       </button>
-    </div>
-
-    <BulkExpenseImport
-      v-if="showBulkImport && !isClosed"
-      :period-id="period.id"
-      :start-date="period.startDate"
-      :end-date="period.endDate"
-      :members="members"
-      :existing-expenses="expenses"
-      @imported="importComplete"
-    />
-
-    <section v-if="imports.length" class="card mb-8 overflow-hidden">
-      <div class="border-b bg-slate-50/70 px-5 py-4">
-        <p class="eyebrow">Import history</p>
-        <h2 class="mt-1 text-lg font-semibold">CSV batches</h2>
-      </div>
-      <div class="divide-y">
-        <div
-          v-for="batch in imports"
-          :key="batch.id"
-          class="flex flex-col justify-between gap-3 px-5 py-4 sm:flex-row sm:items-center"
-        >
-          <div>
-            <p class="font-medium">{{ batch.sourceName }}</p>
-            <p class="mt-1 text-xs text-ink-500">
-              {{ batch.rowCount }} expenses · {{ formatYen(batch.totalAmount) }} ·
-              {{ batch.importedBy }} · {{ formatDateTime(batch.importedAt) }}
-            </p>
-          </div>
-          <button
-            v-if="!isClosed"
-            class="text-left text-sm font-medium text-red-600 hover:text-red-500"
-            type="button"
-            @click="undoImport(batch)"
-          >
-            Undo import
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <form
-      v-if="!isClosed"
-      id="expense-form"
-      class="card mb-8 p-5 sm:p-6"
-      @submit.prevent="saveExpense"
-    >
-      <div class="mb-5 flex items-center justify-between">
-        <div>
-          <p class="eyebrow">{{ editingExpenseId ? 'Editing expense' : 'New expense' }}</p>
-          <h2 class="mt-1 text-xl font-semibold">
-            {{ editingExpenseId ? 'Update expense' : 'Add a shared expense' }}
-          </h2>
-        </div>
-        <button
-          v-if="editingExpenseId"
-          class="text-sm text-ink-500 hover:text-ink-950"
-          type="button"
-          @click="clearExpenseForm"
-        >
-          Cancel
-        </button>
-      </div>
-
-      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div>
-          <label class="label" for="expenseDate">Date</label>
-          <input
-            id="expenseDate"
-            v-model="expenseForm.expenseDate"
-            class="input"
-            type="date"
-            :min="period.startDate"
-            :max="period.endDate"
-            required
-          />
-        </div>
-        <div class="sm:col-span-1 lg:col-span-2">
-          <label class="label" for="description">Description</label>
-          <input
-            id="description"
-            v-model="expenseForm.description"
-            class="input"
-            placeholder="Rent, groceries, utilities…"
-            maxlength="160"
-            required
-          />
-        </div>
-        <div>
-          <label class="label" for="amount">Amount</label>
-          <div class="relative">
-            <span class="pointer-events-none absolute top-2.5 left-3.5 text-sm text-ink-500"
-              >¥</span
-            >
-            <input
-              id="amount"
-              v-model="expenseForm.amount"
-              class="input !pl-8"
-              type="number"
-              min="1"
-              step="1"
-              inputmode="numeric"
-              placeholder="0"
-              required
-            />
-          </div>
-        </div>
-        <div>
-          <label class="label" for="paidBy">Paid by</label>
-          <select id="paidBy" v-model="expenseForm.paidBy" class="input" required>
-            <option v-for="member in members" :key="member.id" :value="String(member.id)">
-              {{ member.name }}
-            </option>
-          </select>
-        </div>
-        <div>
-          <label class="label" for="category">Category</label>
-          <input
-            id="category"
-            v-model="expenseForm.category"
-            class="input"
-            placeholder="Optional"
-            maxlength="80"
-          />
-        </div>
-        <div class="sm:col-span-2">
-          <label class="label" for="notes">Notes</label>
-          <input
-            id="notes"
-            v-model="expenseForm.notes"
-            class="input"
-            placeholder="Optional details"
-            maxlength="2000"
-          />
-        </div>
-      </div>
-      <div class="mt-5 flex justify-end">
-        <button class="button-primary" type="submit" :disabled="saving">
-          {{ saving ? 'Saving…' : editingExpenseId ? 'Update expense' : 'Add expense' }}
-        </button>
-      </div>
-    </form>
-
-    <div>
-      <div class="mb-3 flex items-end justify-between">
-        <div>
-          <p class="eyebrow">Expenses</p>
-          <h2 class="mt-1 text-xl font-semibold">Shared expenses</h2>
-        </div>
-        <p class="text-sm text-ink-500">{{ expenses.length }} total</p>
-      </div>
-
-      <div v-if="!expenses.length" class="card border-dashed p-9 text-center text-sm text-ink-500">
-        No expenses have been added to this period.
-      </div>
-
-      <div v-else class="card overflow-hidden">
-        <div
-          class="hidden grid-cols-[110px_1fr_130px_150px_100px] gap-4 border-b bg-slate-50 px-5 py-3 text-xs font-semibold text-ink-500 md:grid"
-        >
-          <div>Date</div>
-          <div>Expense</div>
-          <div>Paid by</div>
-          <div class="text-right">Amount</div>
-          <div />
-        </div>
-        <div class="divide-y">
-          <div
-            v-for="expense in expenses"
-            :key="expense.id"
-            class="grid gap-3 px-5 py-4 md:grid-cols-[110px_1fr_130px_150px_100px] md:items-center md:gap-4"
-          >
-            <p class="text-sm text-ink-500">
-              {{ formatDate(expense.expenseDate) || 'No date' }}
-            </p>
-            <div>
-              <p class="font-medium">{{ expense.description }}</p>
-              <p v-if="expense.category" class="mt-0.5 text-xs text-ink-500">
-                {{ expense.category }}
-              </p>
-            </div>
-            <p class="text-sm text-ink-700">{{ expense.payerName }}</p>
-            <p class="text-lg font-semibold md:text-right">{{ formatYen(expense.amount) }}</p>
-            <div v-if="!isClosed" class="flex gap-3 text-sm md:justify-end">
-              <button
-                class="font-medium text-mint-700 hover:text-mint-600"
-                type="button"
-                @click="editExpense(expense)"
-              >
-                Edit
-              </button>
-              <button
-                class="font-medium text-red-600 hover:text-red-500"
-                type="button"
-                @click="removeExpense(expense)"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   </section>
 
